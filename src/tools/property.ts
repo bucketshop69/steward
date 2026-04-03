@@ -1,8 +1,11 @@
-// Property tools — implement in issue #011
-
+import { getProperty } from '../store/properties.js';
 import type { Property } from '../types.js';
 
-export async function getPropertyInfo(_propertyId: string, _question?: string): Promise<Property | undefined> {
-  // TODO: implement in issue #011
-  return undefined;
+export function getPropertyInfo(propertyId: string): Omit<Property, 'hostTelegramId' | 'telegramGroupId'> | undefined {
+  const property = getProperty(propertyId);
+  if (!property) return undefined;
+
+  // Return all info except host-internal fields
+  const { hostTelegramId, telegramGroupId, ...info } = property;
+  return info;
 }
