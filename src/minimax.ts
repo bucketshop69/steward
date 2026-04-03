@@ -59,8 +59,8 @@ export async function callMinimax(
     systemPrompt: string,
     opts: CallMinimaxOptions = {}
 ): Promise<AnthropicResponse> {
-    const apiKey = process.env.MINIMAX_API_KEY
-    if (!apiKey) throw new Error('MINIMAX_API_KEY not set')
+    const apiKey = process.env.AGENT_API_KEY ?? process.env.MINIMAX_API_KEY
+    if (!apiKey) throw new Error('AGENT_API_KEY not set. Run: steward init')
 
     const estimatedTokens = estimateTokens(messages, systemPrompt)
     if (estimatedTokens > TOKEN_WARN_THRESHOLD) {

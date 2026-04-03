@@ -60,12 +60,16 @@ export async function runInit(): Promise<void> {
     }
   }
 
-  // MiniMax API Key
+  // Agent API Key
   let apiKey = '';
   while (!apiKey) {
-    apiKey = await ask(rl, 'MiniMax API Key');
-    if (!validateApiKey(apiKey)) {
-      console.log('  Invalid format. Expected: sk-...');
+    apiKey = await ask(rl, 'Agent API Key (LLM provider)');
+    if (!apiKey) {
+      console.log('  API key is required.');
+      console.log('  Examples:');
+      console.log('    MiniMax:   sk-api-... (model: MiniMax-M2.7, endpoint: api.minimax.io)');
+      console.log('    Anthropic: sk-ant-... (model: claude-sonnet-4-20250514)');
+      console.log('    OpenAI:    sk-...     (any Anthropic-compatible endpoint)');
       apiKey = '';
     }
   }
@@ -103,8 +107,8 @@ export async function runInit(): Promise<void> {
     '# Telegram',
     `TELEGRAM_BOT_TOKEN=${botToken}`,
     '',
-    '# AI (MiniMax — Anthropic-compatible endpoint)',
-    `MINIMAX_API_KEY=${apiKey}`,
+    '# AI (Anthropic-compatible endpoint — MiniMax, Anthropic, OpenAI, etc.)',
+    `AGENT_API_KEY=${apiKey}`,
     '',
     '# Solana',
     `HELIUS_RPC_URL=${rpcUrl}`,

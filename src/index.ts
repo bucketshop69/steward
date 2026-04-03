@@ -1,5 +1,24 @@
 #!/usr/bin/env node
 
+import fs from 'node:fs';
+import path from 'node:path';
+
+// Load .env into process.env (no external dependency)
+const envPath = path.resolve('.env');
+if (fs.existsSync(envPath)) {
+  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const value = trimmed.slice(eqIdx + 1).trim();
+    if (key && !(key in process.env)) {
+      process.env[key] = value;
+    }
+  }
+}
+
 const args = process.argv.slice(2);
 const command = args[0];
 const subcommand = args[1];
