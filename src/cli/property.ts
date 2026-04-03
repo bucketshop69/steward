@@ -1,5 +1,5 @@
 import readline from 'node:readline';
-import { addProperty, listProperties } from '../store/properties.js';
+import { addProperty, listProperties, getProperty, updateProperty } from '../store/properties.js';
 import type { Property } from '../types.js';
 
 function createPrompt(): readline.Interface {
@@ -125,7 +125,38 @@ function listPropertiesFlow(): void {
   console.log('');
 }
 
-export async function runProperty(subcommand: string, _args: string[]): Promise<void> {
+function linkPropertyFlow(args: string[]): void {
+  const propertyId = args[0];
+  const groupIdStr = args[1];
+
+  if (!propertyId || !groupIdStr) {
+    console.log('\nUsage: steward property link <property-id> <telegram-group-id>\n');
+    console.log('To get the group ID:');
+    console.log('  1. Add the bot to your Telegram group');
+    console.log('  2. Run: steward start');
+    console.log('  3. Send any message in the group');
+    console.log('  4. Check the bot logs for the group ID\n');
+    return;
+  }
+
+  const property = getProperty(propertyId);
+  if (!property) {
+    console.log(`\nProperty "${propertyId}" not found. Run: steward property list\n`);
+    return;
+  }
+
+  const groupId = Number(groupIdStr);
+  if (isNaN(groupId) || groupId === 0) {
+    console.log('\nInvalid group ID. Telegram group IDs are negative numbers like -1001234567890\n');
+    return;
+  }
+
+  updateProperty(propertyId, { telegramGroupId: groupId });
+  console.log(`\n✅ Linked "${property.name}" to Telegram group ${groupId}`);
+  console.log(`\nNext: steward booking add --property ${propertyId}\n`);
+}
+
+export async function runProperty(subcommand: string, args: string[]): Promise<void> {
   switch (subcommand) {
     case 'add':
       await addPropertyFlow();
@@ -133,11 +164,15 @@ export async function runProperty(subcommand: string, _args: string[]): Promise<
     case 'list':
       listPropertiesFlow();
       break;
+    case 'link':
+      linkPropertyFlow(args);
+      break;
     default:
       console.log(`
 Usage:
-  steward property add     Add a new property
-  steward property list    List all properties
+  steward property add                          Add a new property
+  steward property list                         List all properties
+  steward property link <id> <group-id>         Link property to Telegram group
       `);
   }
 }
