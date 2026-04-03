@@ -4,6 +4,8 @@ import { getPropertyInfo } from './tools/property.js';
 import { checkBudget, getTransactionHistory } from './tools/budget.js';
 import { linkGuest } from './tools/onboarding.js';
 import { escalateToHost } from './tools/escalate.js';
+import { executePlugin, getPluginToolSchemas } from './plugins/registry.js';
+import { createWalletService } from './wallet.js';
 
 const MAX_TOOL_DEPTH = 10;
 
@@ -120,9 +122,20 @@ const TOOL_DEFINITIONS: AnthropicToolDefinition[] = [
       required: ['property_id', 'reason', 'urgency'],
     },
   },
+  // Plugin tools are appended dynamically
+  ...getPluginToolSchemas(),
 ];
 
-function executeTool(name: string, input: Record<string, unknown>): string {
+const PLUGIN_TOOL_NAMES = new Set(['order_food', 'book_cleaning', 'book_taxi', 'book_tickets', 'report_maintenance']);
+const PLUGIN_NAME_MAP: Record<string, string> = {
+  order_food: 'food-delivery',
+  book_cleaning: 'cleaning',
+  book_taxi: 'taxi',
+  book_tickets: 'tickets',
+  report_maintenance: 'maintenance',
+};
+
+function executeTool(name: string, input: Record<string, unknown>, mock: boolean): string {
   try {
     switch (name) {
       case 'get_property_by_group': {
@@ -165,19 +178,56 @@ function executeTool(name: string, input: Record<string, unknown>): string {
         );
         return JSON.stringify(result);
       }
-      default:
+      default: {
+        // Check if it's a plugin tool
+        if (PLUGIN_TOOL_NAMES.has(name)) {
+          const pluginName = PLUGIN_NAME_MAP[name];
+          // Plugin execution is async but we need sync for tool dispatch
+          // Return a placeholder — actual execution happens in executePluginTool
+          return JSON.stringify({ pending_plugin: pluginName, input });
+        }
         return JSON.stringify({ error: `Unknown tool: ${name}` });
+      }
     }
   } catch (err) {
     return JSON.stringify({ error: `Tool error: ${(err as Error).message}` });
   }
 }
 
+async function executePluginTool(
+  name: string,
+  input: Record<string, unknown>,
+  mock: boolean,
+  propertyId?: string,
+  guestInfo?: { name: string; telegramId: number; preferences?: string },
+): Promise<string> {
+  const pluginName = PLUGIN_NAME_MAP[name];
+  if (!pluginName) return JSON.stringify({ error: `Unknown plugin tool: ${name}` });
+
+  const { getProperty } = await import('./store/properties.js');
+  const property = propertyId ? getProperty(propertyId) : undefined;
+
+  if (!property) {
+    return JSON.stringify({ error: 'Property context not available for plugin execution' });
+  }
+
+  const wallet = createWalletService(mock);
+  const result = await executePlugin(pluginName, {
+    guest: guestInfo ?? { name: 'Guest', telegramId: 0 },
+    property,
+    request: JSON.stringify(input),
+    wallet,
+    mock,
+  });
+
+  return JSON.stringify(result);
+}
+
 export async function processMessage(
   groupId: number,
   senderId: number,
   message: string,
-  _mock: boolean,
+  mock: boolean,
 ): Promise<string> {
   // Get or initialize conversation history for this group
   let history = conversationHistory.get(groupId) ?? [];
@@ -217,7 +267,16 @@ export async function processMessage(
     history.push({ role: 'assistant', content: response.content });
 
     for (const toolUse of toolUseBlocks) {
-      const result = executeTool(toolUse.name, toolUse.input as Record<string, unknown>);
+      const toolInput = toolUse.input as Record<string, unknown>;
+      let result: string;
+
+      if (PLUGIN_TOOL_NAMES.has(toolUse.name)) {
+        // Plugin tools need async execution with property/guest context
+        result = await executePluginTool(toolUse.name, toolInput, mock);
+      } else {
+        result = executeTool(toolUse.name, toolInput, mock);
+      }
+
       history.push({
         role: 'user',
         content: [{ type: 'tool_result', tool_use_id: toolUse.id, content: result }],
