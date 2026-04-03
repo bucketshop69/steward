@@ -23,7 +23,8 @@
     "test:plugins": "tsx tests/plugins.test.ts",
     "test:wallet": "tsx tests/wallet.test.ts",
     "test:lifecycle": "tsx tests/lifecycle.test.ts",
-    "test:memory": "tsx tests/memory.test.ts"
+    "test:memory": "tsx tests/memory.test.ts",
+    "test:e2e": "tsx tests/e2e.test.ts"
   },
   "keywords": ["airbnb", "property-management", "ai-agent", "telegram", "solana", "x402", "ows"],
   "author": "bucketshop69",

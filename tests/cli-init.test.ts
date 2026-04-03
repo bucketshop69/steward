@@ -80,7 +80,7 @@ async function main() {
   assert(fs.existsSync(ENV_PATH), '.env file created');
   const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
   assert(envContent.includes('TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI_jklMNO'), '.env has bot token');
-  assert(envContent.includes('MINIMAX_API_KEY=sk-api-test-key-12345'), '.env has MiniMax API key');
+  assert(envContent.includes('AGENT_API_KEY=sk-api-test-key-12345'), '.env has agent API key');
   assert(envContent.includes('OWS_WALLET_NAME=steward-main'), '.env has wallet name');
   assert(envContent.includes('DAILY_BUDGET=200'), '.env has daily budget');
   assert(envContent.includes('PER_TX_LIMIT=100'), '.env has per-tx limit');
@@ -118,7 +118,7 @@ async function main() {
   assert(result3.code === 0, 'exits with code 0 after overwrite');
   const envOverwritten = fs.readFileSync(ENV_PATH, 'utf-8');
   assert(envOverwritten.includes('987654321:ZYXwvuTSR_qpoNML'), '.env has new bot token after overwrite');
-  assert(envOverwritten.includes('sk-api-new-key-99999'), '.env has new MiniMax API key after overwrite');
+  assert(envOverwritten.includes('sk-api-new-key-99999'), '.env has new agent API key after overwrite');
 
   // ── Default values ──────────────────────────────────
 

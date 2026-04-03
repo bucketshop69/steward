@@ -258,6 +258,10 @@ export async function processMessage(
     history = history.slice(-40);
   }
 
+  // Track context discovered during tool calls
+  let discoveredPropertyId: string | undefined;
+  let discoveredGuest: { name: string; telegramId: number; preferences?: string } | undefined;
+
   // Tool use loop
   let depth = 0;
   while (depth < MAX_TOOL_DEPTH) {
@@ -290,9 +294,29 @@ export async function processMessage(
 
       if (PLUGIN_TOOL_NAMES.has(toolUse.name)) {
         // Plugin tools need async execution with property/guest context
-        result = await executePluginTool(toolUse.name, toolInput, mock);
+        result = await executePluginTool(toolUse.name, toolInput, mock, discoveredPropertyId, discoveredGuest);
       } else {
         result = executeTool(toolUse.name, toolInput, mock);
+
+        // Capture context from tool results for plugin calls
+        if (toolUse.name === 'get_property_by_group') {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed.id) discoveredPropertyId = parsed.id;
+          } catch { /* ignore */ }
+        }
+        if (toolUse.name === 'identify_user') {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed.role === 'guest' && parsed.booking) {
+              discoveredGuest = {
+                name: parsed.name ?? parsed.booking.guestName ?? 'Guest',
+                telegramId: senderId,
+                preferences: parsed.booking.preferences,
+              };
+            }
+          } catch { /* ignore */ }
+        }
       }
 
       history.push({
