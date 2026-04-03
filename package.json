@@ -1,23 +1,29 @@
 {
   "name": "steward",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "version": "0.1.0",
+  "description": "Autonomous AI property host agent — Telegram + Claude + OWS wallet + x402 payments",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "steward": "dist/index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["airbnb", "property-management", "ai-agent", "telegram", "solana", "x402", "ows"],
+  "author": "bucketshop69",
+  "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
     "@open-wallet-standard/core": "^1.2.0",
     "grammy": "^1.41.1"
   },
   "devDependencies": {
-    "@types/node": "^25.5.0",
+    "@types/node": "^22.0.0",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.2"
+    "typescript": "^5.7.0"
   }
 }
