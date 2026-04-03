@@ -36,13 +36,14 @@ async function main() {
 Steward — Autonomous AI Property Host
 
 Usage:
-  steward init                          First-time setup
-  steward property add                  Add a property
-  steward property list                 List properties
-  steward booking add --property <id>   Add a booking
-  steward booking list                  List active bookings
-  steward start                         Start the bot
-  steward start --mock                  Start with mocked plugins
+  steward init                                  First-time setup
+  steward property add                          Add a property
+  steward property list                         List properties
+  steward property link <id> <group-id>         Link property to Telegram group
+  steward booking add --property <id>           Add a booking
+  steward booking list                          List active bookings
+  steward start                                 Start the bot
+  steward start --mock                          Start with mock payments
       `);
   }
 }

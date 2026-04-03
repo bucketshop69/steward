@@ -112,7 +112,12 @@ export async function startBot(options: BotOptions): Promise<void> {
 
     // Look up property for this group
     const property = getPropertyByGroupId(groupId);
-    if (!property) return; // Not a managed group
+    if (!property) {
+      // Log unlinked groups so the host can grab the ID
+      console.log(`📍 Unlinked group message — group ID: ${groupId} | sender: ${senderId}`);
+      console.log(`   Run: steward property link <property-id> ${groupId}`);
+      return;
+    }
 
     // Host message handling
     if (isHostMessage(senderId, property.hostTelegramId)) {
