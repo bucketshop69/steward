@@ -12,10 +12,11 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx tests/store.test.ts && tsx tests/cli-init.test.ts && tsx tests/cli-property.test.ts",
+    "test": "tsx tests/store.test.ts && tsx tests/cli-init.test.ts && tsx tests/cli-property.test.ts && tsx tests/cli-booking.test.ts",
     "test:store": "tsx tests/store.test.ts",
     "test:init": "tsx tests/cli-init.test.ts",
-    "test:property": "tsx tests/cli-property.test.ts"
+    "test:property": "tsx tests/cli-property.test.ts",
+    "test:booking": "tsx tests/cli-booking.test.ts"
   },
   "keywords": ["airbnb", "property-management", "ai-agent", "telegram", "solana", "x402", "ows"],
   "author": "bucketshop69",
