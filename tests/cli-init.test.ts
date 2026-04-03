@@ -65,10 +65,9 @@ async function main() {
 
   const result = await runInit([
     '123456789:ABCdefGHI_jklMNO',  // bot token
-    'sk-ant-test-key-12345',        // api key
+    'sk-api-test-key-12345',        // minimax api key
     'steward-main',                 // wallet name
     '',                             // rpc url (skip)
-    'devnet',                       // cluster
     '200',                          // daily budget
     '100',                          // per-tx limit
   ]);
@@ -81,9 +80,8 @@ async function main() {
   assert(fs.existsSync(ENV_PATH), '.env file created');
   const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
   assert(envContent.includes('TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI_jklMNO'), '.env has bot token');
-  assert(envContent.includes('ANTHROPIC_API_KEY=sk-ant-test-key-12345'), '.env has API key');
+  assert(envContent.includes('MINIMAX_API_KEY=sk-api-test-key-12345'), '.env has MiniMax API key');
   assert(envContent.includes('OWS_WALLET_NAME=steward-main'), '.env has wallet name');
-  assert(envContent.includes('CLUSTER=devnet'), '.env has cluster');
   assert(envContent.includes('DAILY_BUDGET=200'), '.env has daily budget');
   assert(envContent.includes('PER_TX_LIMIT=100'), '.env has per-tx limit');
 
@@ -101,7 +99,7 @@ async function main() {
   assert(result2.stdout.includes('Aborted'), 'shows aborted message when declining overwrite');
   // .env should still have original content
   const envAfter = fs.readFileSync(ENV_PATH, 'utf-8');
-  assert(envAfter.includes('sk-ant-test-key-12345'), '.env unchanged after declining overwrite');
+  assert(envAfter.includes('sk-api-test-key-12345'), '.env unchanged after declining overwrite');
 
   // ── Overwrite accepted ──────────────────────────────
 
@@ -110,10 +108,9 @@ async function main() {
   const result3 = await runInit([
     'y',                                // overwrite
     '987654321:ZYXwvuTSR_qpoNML',      // new bot token
-    'sk-ant-new-key-99999',             // new api key
+    'sk-api-new-key-99999',             // new minimax api key
     'steward-test',                     // new wallet name
     '',                                 // rpc url
-    'mainnet',                          // cluster
     '500',                              // daily budget
     '250',                              // per-tx limit
   ]);
@@ -121,8 +118,7 @@ async function main() {
   assert(result3.code === 0, 'exits with code 0 after overwrite');
   const envOverwritten = fs.readFileSync(ENV_PATH, 'utf-8');
   assert(envOverwritten.includes('987654321:ZYXwvuTSR_qpoNML'), '.env has new bot token after overwrite');
-  assert(envOverwritten.includes('sk-ant-new-key-99999'), '.env has new API key after overwrite');
-  assert(envOverwritten.includes('CLUSTER=mainnet'), '.env has new cluster after overwrite');
+  assert(envOverwritten.includes('sk-api-new-key-99999'), '.env has new MiniMax API key after overwrite');
 
   // ── Default values ──────────────────────────────────
 
@@ -131,10 +127,9 @@ async function main() {
 
   const result4 = await runInit([
     '111111111:AABBccDDeeFFgg',   // bot token
-    'sk-ant-default-test',        // api key
+    'sk-api-default-test',        // minimax api key
     '',                           // wallet name (default)
     '',                           // rpc url (skip)
-    '',                           // cluster (default)
     '',                           // daily budget (default)
     '',                           // per-tx limit (default)
   ]);

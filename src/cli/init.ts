@@ -26,7 +26,7 @@ function validateBotToken(token: string): boolean {
 }
 
 function validateApiKey(key: string): boolean {
-  return key.startsWith('sk-ant-');
+  return key.startsWith('sk-');
 }
 
 function validatePositiveNumber(value: string): boolean {
@@ -59,12 +59,12 @@ export async function runInit(): Promise<void> {
     }
   }
 
-  // Anthropic API Key
+  // MiniMax API Key
   let apiKey = '';
   while (!apiKey) {
-    apiKey = await ask(rl, 'Anthropic API Key');
+    apiKey = await ask(rl, 'MiniMax API Key');
     if (!validateApiKey(apiKey)) {
-      console.log('  Invalid format. Expected: sk-ant-...');
+      console.log('  Invalid format. Expected: sk-...');
       apiKey = '';
     }
   }
@@ -72,11 +72,8 @@ export async function runInit(): Promise<void> {
   // OWS Wallet Name
   const walletName = await ask(rl, 'OWS Wallet Name', 'steward-main');
 
-  // Solana RPC URL
-  const rpcUrl = await ask(rl, 'Solana RPC URL (optional, press enter to skip)');
-
-  // Cluster
-  const cluster = await ask(rl, 'Cluster', 'devnet');
+  // Helius RPC URL
+  const rpcUrl = await ask(rl, 'Helius RPC URL (optional, press enter to skip)');
 
   // Daily Budget
   let dailyBudget = '';
@@ -105,15 +102,14 @@ export async function runInit(): Promise<void> {
     '# Telegram',
     `TELEGRAM_BOT_TOKEN=${botToken}`,
     '',
-    '# AI',
-    `ANTHROPIC_API_KEY=${apiKey}`,
+    '# AI (MiniMax — Anthropic-compatible endpoint)',
+    `MINIMAX_API_KEY=${apiKey}`,
+    '',
+    '# Solana',
+    `HELIUS_RPC_URL=${rpcUrl}`,
     '',
     '# OWS',
     `OWS_WALLET_NAME=${walletName}`,
-    '',
-    '# Solana',
-    `SOLANA_RPC_URL=${rpcUrl}`,
-    `CLUSTER=${cluster}`,
     '',
     '# Defaults',
     `DAILY_BUDGET=${dailyBudget}`,
