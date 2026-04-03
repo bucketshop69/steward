@@ -2,6 +2,7 @@ import { Bot, Context, GrammyError, HttpError } from 'grammy';
 import { getPropertyByGroupId } from './store/properties.js';
 import { getBookingByGroupId, getActiveBooking } from './store/bookings.js';
 import { processMessage } from './agent.js';
+import { checkLifecycleEvents } from './lifecycle.js';
 
 export interface BotOptions {
   mock: boolean;
@@ -159,15 +160,27 @@ export async function startBot(options: BotOptions): Promise<void> {
   const properties = (await import('./store/properties.js')).listProperties();
   const bookings = (await import('./store/bookings.js')).listBookings();
   const activeBookings = bookings.filter((b) => b.status === 'active' || b.status === 'pending');
+  const walletName = process.env['OWS_WALLET_NAME'] ?? 'steward-main';
 
   console.log(`
 🏠 Steward is running!
    Mode: ${mock ? 'mock' : 'production'}
    Properties: ${properties.length} configured
    Active bookings: ${activeBookings.length}
+   Wallet: ${walletName}${mock ? ' (mock mode)' : ''}
 
    Listening for messages...
   `);
+
+  // Fire any lifecycle events on startup (check-in/check-out day messages)
+  const lifecycleMessages = checkLifecycleEvents();
+  for (const msg of lifecycleMessages) {
+    try {
+      await bot.api.sendMessage(msg.groupId, msg.text);
+    } catch (err) {
+      console.error(`Failed to send lifecycle message to group ${msg.groupId}:`, (err as Error).message);
+    }
+  }
 
   // Graceful shutdown
   const shutdown = () => {
