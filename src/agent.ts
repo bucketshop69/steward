@@ -6,6 +6,9 @@ import { linkGuest } from './tools/onboarding.js';
 import { escalateToHost } from './tools/escalate.js';
 import { executePlugin, getPluginToolSchemas } from './plugins/registry.js';
 import { createWalletService } from './wallet.js';
+import { saveHistory, loadHistory, loadSnapshot, saveSnapshot, generateSnapshot, buildContextMessages } from './memory.js';
+import { getBookingByGroupId } from './store/bookings.js';
+import { getTotalSpend } from './store/transactions.js';
 
 const MAX_TOOL_DEPTH = 10;
 
@@ -232,6 +235,18 @@ export async function processMessage(
   // Get or initialize conversation history for this group
   let history = conversationHistory.get(groupId) ?? [];
 
+  // On first message in session, try to restore from disk
+  if (history.length === 0) {
+    const booking = getBookingByGroupId(groupId);
+    if (booking) {
+      const saved = loadHistory(booking);
+      const snapshot = loadSnapshot(booking);
+      if (saved.length > 0) {
+        history = buildContextMessages(saved, snapshot);
+      }
+    }
+  }
+
   // Add user message with context metadata
   history.push({
     role: 'user',
@@ -259,6 +274,9 @@ export async function processMessage(
       // Save assistant response to history
       history.push({ role: 'assistant', content: response.content });
       conversationHistory.set(groupId, history);
+
+      // Persist to disk
+      persistHistory(groupId, history);
 
       return text;
     }
@@ -288,7 +306,23 @@ export async function processMessage(
 
   // If we hit max depth, return what we have
   conversationHistory.set(groupId, history);
+  persistHistory(groupId, history);
   return 'I ran into a complex situation. Let me get the host to help.';
+}
+
+/** Persist history and generate snapshot if needed. */
+function persistHistory(groupId: number, history: AnthropicMessage[]): void {
+  const booking = getBookingByGroupId(groupId);
+  if (!booking) return;
+
+  saveHistory(booking, history);
+
+  // Generate snapshot every 20 messages
+  if (history.length > 0 && history.length % 20 === 0) {
+    const totalSpent = getTotalSpend(booking.id);
+    const snapshot = generateSnapshot(booking, history, totalSpent);
+    saveSnapshot(booking, snapshot);
+  }
 }
 
 export function clearHistory(groupId: number): void {
