@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { createOWSWallet } from '../wallet.js';
 
 const ENV_PATH = path.resolve('.env');
 const DATA_DIR = path.resolve('data');
@@ -124,8 +125,21 @@ export async function runInit(): Promise<void> {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
 
+  // Create OWS wallet silently
+  console.log('\n🔑 Setting up OWS wallet...');
+  try {
+    const solanaAddress = await createOWSWallet(walletName);
+    console.log(`  Wallet "${walletName}" ready`);
+    console.log(`  Solana address: ${solanaAddress}`);
+    console.log('  Fund this address with USDC to enable service payments.');
+  } catch (err) {
+    console.log(`  ⚠️  Could not create wallet: ${(err as Error).message}`);
+    console.log('  Make sure OWS CLI is installed: https://docs.openwallet.sh');
+    console.log('  You can create the wallet later: ows wallet create --name ' + walletName);
+  }
+
   console.log('\n✅ Steward configured!\n');
   console.log('Next steps:');
   console.log('  steward property add    — add your first property');
-  console.log('  steward start --mock    — start in demo mode\n');
+  console.log('  steward start           — start the agent\n');
 }
