@@ -33,20 +33,12 @@ assert(agent.getHistory(12345).length === 0, 'empty history for new group');
 // ── Tool definitions completeness ───────────────────
 
 console.log('\nTool definitions:');
-// We can verify the tool schemas are valid by checking the agent module
-// The agent uses these internally — we verify the tool execution layer works
-// by testing with the tools test above
-
-// Verify all expected tools are handled in executeTool
-// We do this by checking the agent source imports all tool modules
 const agentSource = fs.readFileSync(path.resolve('src/agent.ts'), 'utf-8');
 const expectedTools = [
   'getPropertyByGroup',
   'identifyUser',
   'getBooking',
   'getPropertyInfo',
-  'checkBudget',
-  'getTransactionHistory',
   'linkGuest',
   'escalateToHost',
 ];
@@ -60,10 +52,9 @@ const expectedToolNames = [
   'identify_user',
   'get_booking',
   'get_property_info',
-  'check_budget',
-  'get_transaction_history',
   'link_guest',
   'escalate_to_host',
+  'check_payment',
 ];
 
 for (const name of expectedToolNames) {
@@ -75,7 +66,7 @@ for (const name of expectedToolNames) {
 console.log('\nSystem prompt:');
 assert(agentSource.includes('You are Steward'), 'system prompt defines Steward persona');
 assert(agentSource.includes('get_property_by_group'), 'system prompt mentions context discovery');
-assert(agentSource.includes('check the budget'), 'system prompt mentions budget checking');
+assert(agentSource.includes('PAYMENT FLOW'), 'system prompt mentions payment flow');
 
 // ── Tool use loop structure ─────────────────────────
 

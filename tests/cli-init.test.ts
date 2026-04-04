@@ -4,22 +4,18 @@ import { spawn } from 'node:child_process';
 
 const ENV_PATH = path.resolve('.env');
 const DATA_DIR = path.resolve('data');
+const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
 let passed = 0;
 let failed = 0;
 
 function assert(condition: boolean, name: string) {
-  if (condition) {
-    console.log(`  ✓ ${name}`);
-    passed++;
-  } else {
-    console.log(`  ✗ ${name}`);
-    failed++;
-  }
+  if (condition) { console.log(`  ✓ ${name}`); passed++; }
+  else { console.log(`  ✗ ${name}`); failed++; }
 }
 
 function cleanup() {
   if (fs.existsSync(ENV_PATH)) fs.unlinkSync(ENV_PATH);
-  if (fs.existsSync(DATA_DIR)) fs.rmSync(DATA_DIR, { recursive: true });
+  if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
 }
 
 function runInit(inputs: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
@@ -34,7 +30,6 @@ function runInit(inputs: string[]): Promise<{ stdout: string; stderr: string; co
 
     child.stdout.on('data', (data) => {
       stdout += data.toString();
-      // Feed next input when we see a prompt (colon at end)
       if (inputs.length > 0 && data.toString().includes(':')) {
         const input = inputs.shift()!;
         child.stdin.write(input + '\n');
@@ -47,7 +42,6 @@ function runInit(inputs: string[]): Promise<{ stdout: string; stderr: string; co
       resolve({ stdout, stderr, code: code ?? 1 });
     });
 
-    // Timeout after 10s
     setTimeout(() => {
       child.kill();
       resolve({ stdout, stderr, code: 1 });
@@ -65,11 +59,10 @@ async function main() {
 
   const result = await runInit([
     '123456789:ABCdefGHI_jklMNO',  // bot token
-    'sk-api-test-key-12345',        // minimax api key
+    'sk-api-test-key-12345',        // agent api key
+    '7883754831',                   // host telegram ID
     'steward-main',                 // wallet name
     '',                             // rpc url (skip)
-    '200',                          // daily budget
-    '100',                          // per-tx limit
   ]);
 
   assert(result.code === 0, 'exits with code 0');
@@ -82,11 +75,12 @@ async function main() {
   assert(envContent.includes('TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI_jklMNO'), '.env has bot token');
   assert(envContent.includes('AGENT_API_KEY=sk-api-test-key-12345'), '.env has agent API key');
   assert(envContent.includes('OWS_WALLET_NAME=steward-main'), '.env has wallet name');
-  assert(envContent.includes('DAILY_BUDGET=200'), '.env has daily budget');
-  assert(envContent.includes('PER_TX_LIMIT=100'), '.env has per-tx limit');
 
-  // Verify data dir
-  assert(fs.existsSync(DATA_DIR), 'data/ directory created');
+  // Verify steward.json was created with host ID
+  assert(fs.existsSync(STEWARD_JSON), 'steward.json created');
+  const config = JSON.parse(fs.readFileSync(STEWARD_JSON, 'utf-8'));
+  assert(config.hostTelegramId === 7883754831, 'host telegram ID stored in steward.json');
+  assert(Array.isArray(config.groups), 'groups array initialized');
 
   // ── Overwrite protection ────────────────────────────
 
@@ -97,7 +91,6 @@ async function main() {
   ]);
 
   assert(result2.stdout.includes('Aborted'), 'shows aborted message when declining overwrite');
-  // .env should still have original content
   const envAfter = fs.readFileSync(ENV_PATH, 'utf-8');
   assert(envAfter.includes('sk-api-test-key-12345'), '.env unchanged after declining overwrite');
 
@@ -108,11 +101,10 @@ async function main() {
   const result3 = await runInit([
     'y',                                // overwrite
     '987654321:ZYXwvuTSR_qpoNML',      // new bot token
-    'sk-api-new-key-99999',             // new minimax api key
+    'sk-api-new-key-99999',             // new agent api key
+    '1111111111',                       // new host telegram ID
     'steward-test',                     // new wallet name
     '',                                 // rpc url
-    '500',                              // daily budget
-    '250',                              // per-tx limit
   ]);
 
   assert(result3.code === 0, 'exits with code 0 after overwrite');
@@ -127,18 +119,15 @@ async function main() {
 
   const result4 = await runInit([
     '111111111:AABBccDDeeFFgg',   // bot token
-    'sk-api-default-test',        // minimax api key
+    'sk-api-default-test',        // agent api key
+    '9999999999',                 // host telegram ID
     '',                           // wallet name (default)
     '',                           // rpc url (skip)
-    '',                           // daily budget (default)
-    '',                           // per-tx limit (default)
   ]);
 
   assert(result4.code === 0, 'exits with code 0 with defaults');
   const envDefaults = fs.readFileSync(ENV_PATH, 'utf-8');
   assert(envDefaults.includes('OWS_WALLET_NAME=steward-main'), 'default wallet name applied');
-  assert(envDefaults.includes('DAILY_BUDGET=200'), 'default daily budget applied');
-  assert(envDefaults.includes('PER_TX_LIMIT=100'), 'default per-tx limit applied');
 
   // ── Cleanup ─────────────────────────────────────────
 

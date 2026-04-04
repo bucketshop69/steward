@@ -121,7 +121,7 @@ Amenities: pool, AC, parking, washer, dishwasher
 Nearby: Whole Foods (5 min walk), Beach Bar (2 min), Hospital (10 min drive)
 Daily budget (USDC): 200
 Per-transaction limit (USDC): 100
-Your Telegram user ID: 7883754831
+Your Telegram user ID: <your-telegram-id>
 ```
 
 Saved to `data/properties.json`.

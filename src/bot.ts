@@ -1,8 +1,9 @@
 import { Bot, Context, GrammyError, HttpError } from 'grammy';
-import { getPropertyByGroupId } from './store/properties.js';
+import { getPropertyByGroupId, getHostTelegramId } from './store/properties.js';
 import { getBookingByGroupId, getActiveBooking } from './store/bookings.js';
 import { processMessage } from './agent.js';
 import { checkLifecycleEvents } from './lifecycle.js';
+import { readConfig } from './store/steward.js';
 
 export interface BotOptions {
   mock: boolean;
@@ -11,16 +12,16 @@ export interface BotOptions {
 // Per-group pause state (host can pause the agent)
 const pausedGroups = new Set<number>();
 
-function isHostMessage(senderId: number, hostTelegramId: number): boolean {
-  return senderId === hostTelegramId;
+function isHostMessage(senderId: number): boolean {
+  return senderId === getHostTelegramId();
 }
 
 function hasStewardMention(text: string): boolean {
-  return /[@]steward/i.test(text);
+  return /@steward/i.test(text);
 }
 
 function parseStewardCommand(text: string): string | null {
-  const match = text.match(/@steward\s+(.+)/i);
+  const match = text.match(/@steward\S*\s+(.+)/i);
   return match ? match[1].trim().toLowerCase() : null;
 }
 
@@ -65,8 +66,7 @@ export async function startBot(options: BotOptions): Promise<void> {
       'Host commands:\n' +
       '  @steward handle this — resume agent\n' +
       '  @steward stop — pause agent\n' +
-      '  @steward summary — booking summary\n' +
-      '  @steward budget — remaining budget'
+      '  @steward summary — booking summary'
     );
   });
 
@@ -78,11 +78,9 @@ export async function startBot(options: BotOptions): Promise<void> {
 
     const newMembers = ctx.message.new_chat_members;
     for (const member of newMembers) {
-      // Skip bots
       if (member.is_bot) continue;
 
-      const booking = getActiveBooking(property.id) ??
-        getBookingByGroupId(groupId);
+      const booking = getActiveBooking(groupId);
 
       if (booking) {
         await ctx.reply(
@@ -113,21 +111,23 @@ export async function startBot(options: BotOptions): Promise<void> {
     // Look up property for this group
     const property = getPropertyByGroupId(groupId);
     if (!property) {
-      // Log unlinked groups so the host can grab the ID
       console.log(`📍 Unlinked group message — group ID: ${groupId} | sender: ${senderId}`);
-      console.log(`   Run: steward property link <property-id> ${groupId}`);
       return;
     }
 
     // Host message handling
-    if (isHostMessage(senderId, property.hostTelegramId)) {
+    if (isHostMessage(senderId)) {
       if (hasStewardMention(text)) {
+        console.log(`🏠 Host command: "${text}"`);
         const command = parseStewardCommand(text);
-        await handleHostCommand(ctx, command, groupId, property.id, mock);
+        await handleHostCommand(ctx, command, groupId, mock);
+      } else {
+        console.log(`🏠 Host is talking — agent stays quiet ("${text.slice(0, 50)}")`);
       }
-      // Otherwise: host is talking, agent stays quiet
       return;
     }
+
+    console.log(`💬 Guest message from ${senderId}: "${text.slice(0, 80)}"`);
 
     // Agent is paused in this group
     if (pausedGroups.has(groupId)) return;
@@ -136,6 +136,7 @@ export async function startBot(options: BotOptions): Promise<void> {
     try {
       const response = await processMessage(groupId, senderId, text, mock);
       if (response) {
+        console.log(`🤖 Agent response: "${response.slice(0, 150)}${response.length > 150 ? '...' : ''}"`);
         await ctx.reply(response);
       }
     } catch (err) {
@@ -162,22 +163,22 @@ export async function startBot(options: BotOptions): Promise<void> {
   });
 
   // Startup info
-  const properties = (await import('./store/properties.js')).listProperties();
-  const bookings = (await import('./store/bookings.js')).listBookings();
-  const activeBookings = bookings.filter((b) => b.status === 'active' || b.status === 'pending');
+  const config = readConfig();
+  const allBookings = config.groups.flatMap((g) => g.bookings);
+  const activeBookings = allBookings.filter((b) => b.status === 'active' || b.status === 'pending');
   const walletName = process.env['OWS_WALLET_NAME'] ?? 'steward-main';
 
   console.log(`
 🏠 Steward is running!
    Mode: ${mock ? 'mock' : 'production'}
-   Properties: ${properties.length} configured
+   Groups: ${config.groups.length} configured
    Active bookings: ${activeBookings.length}
    Wallet: ${walletName}${mock ? ' (mock mode)' : ''}
 
    Listening for messages...
   `);
 
-  // Fire any lifecycle events on startup (check-in/check-out day messages)
+  // Fire any lifecycle events on startup
   const lifecycleMessages = checkLifecycleEvents();
   for (const msg of lifecycleMessages) {
     try {
@@ -196,7 +197,6 @@ export async function startBot(options: BotOptions): Promise<void> {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  // Start polling
   await bot.start();
 }
 
@@ -204,11 +204,10 @@ async function handleHostCommand(
   ctx: Context,
   command: string | null,
   groupId: number,
-  propertyId: string,
   _mock: boolean,
 ): Promise<void> {
   if (!command) {
-    await ctx.reply('Use: @steward handle this | stop | summary | budget');
+    await ctx.reply('Use: @steward handle this | stop | summary');
     return;
   }
 
@@ -225,58 +224,21 @@ async function handleHostCommand(
   }
 
   if (command === 'summary') {
-    const { listTransactions } = await import('./store/transactions.js');
-    const { getActiveBooking } = await import('./store/bookings.js');
-    const booking = getActiveBooking(propertyId);
+    const booking = getActiveBooking(groupId);
     if (!booking) {
-      await ctx.reply('No active booking for this property.');
+      await ctx.reply('No active booking for this group.');
       return;
     }
 
-    const txs = listTransactions(propertyId, booking.id);
-    const total = txs.reduce((sum, t) => sum + t.amount, 0);
-
-    const byPlugin = new Map<string, number>();
-    for (const t of txs) {
-      byPlugin.set(t.plugin, (byPlugin.get(t.plugin) ?? 0) + t.amount);
-    }
-
+    const property = getPropertyByGroupId(groupId);
     let summary = `📊 Booking summary: ${booking.guestName}\n`;
+    summary += `   Property: ${property?.name ?? 'unknown'}\n`;
     summary += `   ${booking.checkIn} → ${booking.checkOut}\n`;
-    summary += `   Status: ${booking.status}\n\n`;
-
-    if (byPlugin.size > 0) {
-      for (const [plugin, amount] of byPlugin) {
-        const count = txs.filter((t) => t.plugin === plugin).length;
-        summary += `   - ${plugin}: $${amount} USDC (${count} ${count === 1 ? 'order' : 'orders'})\n`;
-      }
-      summary += `\n   Total: $${total} USDC`;
-    } else {
-      summary += '   No transactions yet.';
-    }
+    summary += `   Status: ${booking.status}`;
 
     await ctx.reply(summary);
     return;
   }
 
-  if (command === 'budget') {
-    const { getProperty } = await import('./store/properties.js');
-    const { getTodaySpend } = await import('./store/transactions.js');
-    const property = getProperty(propertyId);
-    if (!property) return;
-
-    const todaySpend = getTodaySpend(propertyId);
-    const remaining = property.dailyBudget - todaySpend;
-
-    await ctx.reply(
-      `💰 Budget for ${property.name}\n\n` +
-      `   Daily limit: $${property.dailyBudget} USDC\n` +
-      `   Spent today: $${todaySpend} USDC\n` +
-      `   Remaining: $${remaining} USDC\n` +
-      `   Per-tx limit: $${property.perTransactionLimit} USDC`
-    );
-    return;
-  }
-
-  await ctx.reply(`Unknown command: "${command}". Use: handle this | stop | summary | budget`);
+  await ctx.reply(`Unknown command: "${command}". Use: handle this | stop | summary`);
 }

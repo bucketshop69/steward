@@ -1,13 +1,13 @@
-import { getProperty } from '../store/properties.js';
+import { getPropertyByGroupId } from '../store/properties.js';
 import { listBookings, updateBooking, getBooking } from '../store/bookings.js';
 import type { Booking, Property } from '../types.js';
 
 export function linkGuest(
   telegramId: number,
-  propertyId: string,
+  groupId: number,
   bookingRef?: string,
 ): { success: boolean; booking?: Booking; property?: Property; error?: string } {
-  const property = getProperty(propertyId);
+  const property = getPropertyByGroupId(groupId);
   if (!property) return { success: false, error: 'Property not found' };
 
   let booking: Booking | undefined;
@@ -15,8 +15,8 @@ export function linkGuest(
   if (bookingRef) {
     booking = getBooking(bookingRef);
   } else {
-    // Find a pending booking for this property
-    const bookings = listBookings(propertyId);
+    // Find a pending booking for this group
+    const bookings = listBookings(groupId);
     booking = bookings.find((b) => b.status === 'pending');
   }
 

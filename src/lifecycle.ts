@@ -6,8 +6,7 @@
  */
 
 import { listBookings, updateBooking } from './store/bookings.js';
-import { getProperty } from './store/properties.js';
-import { listTransactions } from './store/transactions.js';
+import { readConfig } from './store/steward.js';
 import type { Booking, Property } from './types.js';
 
 // Track which lifecycle events have fired (bookingId → Set of event names)
@@ -38,33 +37,33 @@ export interface LifecycleMessage {
 export function checkLifecycleEvents(): LifecycleMessage[] {
   const today = todayISO();
   const messages: LifecycleMessage[] = [];
+  const config = readConfig();
 
-  for (const booking of listBookings()) {
-    const property = getProperty(booking.propertyId);
-    if (!property || !booking.telegramGroupId) continue;
+  for (const group of config.groups) {
+    for (const booking of group.bookings) {
+      // Check-in day
+      if (booking.checkIn === today && !hasFired(booking.id, 'checkin')) {
+        const msg = buildCheckinMessage(booking, group.property);
+        if (msg) {
+          messages.push({ groupId: group.telegramGroupId, text: msg });
+          markFired(booking.id, 'checkin');
 
-    // Check-in day
-    if (booking.checkIn === today && !hasFired(booking.id, 'checkin')) {
-      const msg = buildCheckinMessage(booking, property);
-      if (msg) {
-        messages.push({ groupId: booking.telegramGroupId, text: msg });
-        markFired(booking.id, 'checkin');
-
-        // Transition pending → active
-        if (booking.status === 'pending') {
-          updateBooking(booking.id, { status: 'active' });
+          // Transition pending → active
+          if (booking.status === 'pending') {
+            updateBooking(booking.id, { status: 'active' });
+          }
         }
       }
-    }
 
-    // Check-out day
-    if (booking.checkOut === today && booking.status === 'active' && !hasFired(booking.id, 'checkout')) {
-      const msg = buildCheckoutMessage(booking, property);
-      messages.push({ groupId: booking.telegramGroupId, text: msg });
-      markFired(booking.id, 'checkout');
+      // Check-out day
+      if (booking.checkOut === today && booking.status === 'active' && !hasFired(booking.id, 'checkout')) {
+        const msg = buildCheckoutMessage(booking, group.property);
+        messages.push({ groupId: group.telegramGroupId, text: msg });
+        markFired(booking.id, 'checkout');
 
-      // Transition active → checked_out
-      updateBooking(booking.id, { status: 'checked_out' });
+        // Transition active → checked_out
+        updateBooking(booking.id, { status: 'checked_out' });
+      }
     }
   }
 
@@ -92,30 +91,8 @@ function buildCheckinMessage(booking: Booking, property: Property): string {
 }
 
 function buildCheckoutMessage(booking: Booking, property: Property): string {
-  const txs = listTransactions(booking.propertyId, booking.id);
-  const total = txs.reduce((sum, t) => sum + t.amount, 0);
-
   let msg = `👋 Check-out day, ${booking.guestName}! We hope you enjoyed ${property.name}.\n\n`;
-
-  if (txs.length > 0) {
-    msg += '📊 Your stay summary:\n';
-
-    const byPlugin = new Map<string, { amount: number; count: number }>();
-    for (const t of txs) {
-      const existing = byPlugin.get(t.plugin) ?? { amount: 0, count: 0 };
-      byPlugin.set(t.plugin, { amount: existing.amount + t.amount, count: existing.count + 1 });
-    }
-
-    for (const [plugin, { amount, count }] of byPlugin) {
-      msg += `   - ${plugin}: $${amount} USDC (${count} ${count === 1 ? 'order' : 'orders'})\n`;
-    }
-
-    msg += `\n   Total: $${total} USDC\n`;
-  } else {
-    msg += 'No services were ordered during your stay.\n';
-  }
-
-  msg += '\nA standard cleaning has been scheduled. Thank you for staying with us! 🙏';
+  msg += 'A standard cleaning has been scheduled. Thank you for staying with us! 🙏';
   return msg;
 }
 

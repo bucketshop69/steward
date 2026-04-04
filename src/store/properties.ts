@@ -1,52 +1,38 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import type { Property } from '../types.js';
+import { readConfig, writeConfig } from './steward.js';
 
-const DATA_DIR = path.resolve('data');
-const FILE = path.join(DATA_DIR, 'properties.json');
-
-function ensureDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
+export function listProperties(): (Property & { groupId: number })[] {
+  const { groups } = readConfig();
+  return groups.map((g) => ({ ...g.property, groupId: g.telegramGroupId }));
 }
 
-function readAll(): Property[] {
-  if (!fs.existsSync(FILE)) return [];
-  const raw = fs.readFileSync(FILE, 'utf-8');
-  return JSON.parse(raw) as Property[];
-}
-
-function writeAll(properties: Property[]): void {
-  ensureDir();
-  fs.writeFileSync(FILE, JSON.stringify(properties, null, 2));
-}
-
-export function listProperties(): Property[] {
-  return readAll();
-}
-
-export function getProperty(id: string): Property | undefined {
-  return readAll().find((p) => p.id === id);
+export function getProperty(groupId: number): Property | undefined {
+  const { groups } = readConfig();
+  const group = groups.find((g) => g.telegramGroupId === groupId);
+  return group?.property;
 }
 
 export function getPropertyByGroupId(groupId: number): Property | undefined {
-  return readAll().find((p) => p.telegramGroupId === groupId);
+  return getProperty(groupId);
 }
 
-export function addProperty(property: Property): void {
-  const all = readAll();
-  if (all.some((p) => p.id === property.id)) {
-    throw new Error(`Property with id "${property.id}" already exists`);
+export function addProperty(telegramGroupId: number, property: Property): void {
+  const config = readConfig();
+  if (config.groups.some((g) => g.telegramGroupId === telegramGroupId)) {
+    throw new Error(`Group ${telegramGroupId} already has a property configured.`);
   }
-  all.push(property);
-  writeAll(all);
+  config.groups.push({ telegramGroupId, property, bookings: [] });
+  writeConfig(config);
 }
 
-export function updateProperty(id: string, updates: Partial<Property>): void {
-  const all = readAll();
-  const idx = all.findIndex((p) => p.id === id);
-  if (idx === -1) throw new Error(`Property "${id}" not found`);
-  all[idx] = { ...all[idx], ...updates };
-  writeAll(all);
+export function updateProperty(groupId: number, updates: Partial<Property>): void {
+  const config = readConfig();
+  const group = config.groups.find((g) => g.telegramGroupId === groupId);
+  if (!group) throw new Error(`No group with ID ${groupId}`);
+  group.property = { ...group.property, ...updates };
+  writeConfig(config);
+}
+
+export function getHostTelegramId(): number {
+  return readConfig().hostTelegramId;
 }

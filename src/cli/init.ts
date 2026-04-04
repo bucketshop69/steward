@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { createOWSWallet } from '../wallet.js';
+import { writeConfig, readConfig } from '../store/steward.js';
 
 const ENV_PATH = path.resolve('.env');
 const DATA_DIR = path.resolve('data');
@@ -74,31 +75,22 @@ export async function runInit(): Promise<void> {
     }
   }
 
+  // Host Telegram ID
+  let hostTelegramId = 0;
+  while (hostTelegramId <= 0) {
+    const val = await ask(rl, 'Your Telegram user ID (send /start to @userinfobot to get it)');
+    hostTelegramId = Number(val);
+    if (isNaN(hostTelegramId) || hostTelegramId <= 0) {
+      console.log('  Must be a valid number.');
+      hostTelegramId = 0;
+    }
+  }
+
   // OWS Wallet Name
   const walletName = await ask(rl, 'OWS Wallet Name', 'steward-main');
 
   // Helius RPC URL
   const rpcUrl = await ask(rl, 'Helius RPC URL (optional, press enter to skip)');
-
-  // Daily Budget
-  let dailyBudget = '';
-  while (!dailyBudget) {
-    dailyBudget = await ask(rl, 'Default Daily Budget (USDC)', '200');
-    if (!validatePositiveNumber(dailyBudget)) {
-      console.log('  Must be a positive number.');
-      dailyBudget = '';
-    }
-  }
-
-  // Per-Transaction Limit
-  let perTxLimit = '';
-  while (!perTxLimit) {
-    perTxLimit = await ask(rl, 'Default Per-Transaction Limit (USDC)', '100');
-    if (!validatePositiveNumber(perTxLimit)) {
-      console.log('  Must be a positive number.');
-      perTxLimit = '';
-    }
-  }
 
   rl.close();
 
@@ -116,17 +108,21 @@ export async function runInit(): Promise<void> {
     '# OWS',
     `OWS_WALLET_NAME=${walletName}`,
     '',
-    '# Defaults',
-    `DAILY_BUDGET=${dailyBudget}`,
-    `PER_TX_LIMIT=${perTxLimit}`,
-    '',
   ].join('\n');
 
   fs.writeFileSync(ENV_PATH, envContent);
 
-  // Create data directory
+  // Create data directory and steward.json
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  // Initialize steward.json with host ID (groups added later via `steward property add`)
+  const existing = readConfig();
+  if (existing.hostTelegramId === 0) {
+    writeConfig({ hostTelegramId, groups: [] });
+  } else {
+    writeConfig({ ...existing, hostTelegramId });
   }
 
   // Create OWS wallet silently

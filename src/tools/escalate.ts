@@ -1,11 +1,11 @@
-import { getProperty } from '../store/properties.js';
+import { getPropertyByGroupId, getHostTelegramId } from '../store/properties.js';
 
 export function escalateToHost(
-  propertyId: string,
+  groupId: number,
   reason: string,
   urgency: 'low' | 'medium' | 'high',
 ): { message: string; hostTelegramId?: number } {
-  const property = getProperty(propertyId);
+  const property = getPropertyByGroupId(groupId);
   if (!property) return { message: 'Cannot escalate: property not found' };
 
   const urgencyEmoji = urgency === 'high' ? '🚨' : urgency === 'medium' ? '⚠️' : 'ℹ️';
@@ -18,5 +18,5 @@ export function escalateToHost(
     `Reason: ${reason}`,
   ].join('\n');
 
-  return { message, hostTelegramId: property.hostTelegramId };
+  return { message, hostTelegramId: getHostTelegramId() };
 }

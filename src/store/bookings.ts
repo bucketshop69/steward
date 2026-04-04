@@ -1,92 +1,54 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import type { Booking, GroupMapping } from '../types.js';
+import type { Booking } from '../types.js';
+import { readConfig, writeConfig } from './steward.js';
 
-const DATA_DIR = path.resolve('data');
-const BOOKINGS_FILE = path.join(DATA_DIR, 'bookings.json');
-const MAPPINGS_FILE = path.join(DATA_DIR, 'group-mappings.json');
-
-function ensureDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+export function listBookings(groupId?: number): Booking[] {
+  const { groups } = readConfig();
+  if (groupId !== undefined) {
+    const group = groups.find((g) => g.telegramGroupId === groupId);
+    return group?.bookings ?? [];
   }
+  return groups.flatMap((g) => g.bookings);
 }
 
-function readBookings(): Booking[] {
-  if (!fs.existsSync(BOOKINGS_FILE)) return [];
-  return JSON.parse(fs.readFileSync(BOOKINGS_FILE, 'utf-8')) as Booking[];
+export function getBooking(bookingId: string): Booking | undefined {
+  const { groups } = readConfig();
+  for (const g of groups) {
+    const b = g.bookings.find((b) => b.id === bookingId);
+    if (b) return b;
+  }
+  return undefined;
 }
 
-function writeBookings(bookings: Booking[]): void {
-  ensureDir();
-  fs.writeFileSync(BOOKINGS_FILE, JSON.stringify(bookings, null, 2));
-}
-
-function readMappings(): GroupMapping[] {
-  if (!fs.existsSync(MAPPINGS_FILE)) return [];
-  return JSON.parse(fs.readFileSync(MAPPINGS_FILE, 'utf-8')) as GroupMapping[];
-}
-
-function writeMappings(mappings: GroupMapping[]): void {
-  ensureDir();
-  fs.writeFileSync(MAPPINGS_FILE, JSON.stringify(mappings, null, 2));
-}
-
-export function listBookings(propertyId?: string): Booking[] {
-  const all = readBookings();
-  if (!propertyId) return all;
-  return all.filter((b) => b.propertyId === propertyId);
-}
-
-export function getBooking(id: string): Booking | undefined {
-  return readBookings().find((b) => b.id === id);
-}
-
-export function getActiveBooking(propertyId: string): Booking | undefined {
-  return readBookings().find((b) => b.propertyId === propertyId && b.status === 'active');
+export function getActiveBooking(groupId: number): Booking | undefined {
+  const { groups } = readConfig();
+  const group = groups.find((g) => g.telegramGroupId === groupId);
+  return group?.bookings.find((b) => b.status === 'active');
 }
 
 export function getBookingByGroupId(groupId: number): Booking | undefined {
-  const mapping = readMappings().find((m) => m.telegramGroupId === groupId);
-  if (!mapping) return undefined;
-  return getBooking(mapping.bookingId);
+  return getActiveBooking(groupId);
 }
 
-export function addBooking(booking: Booking): void {
-  const all = readBookings();
-  if (all.some((b) => b.id === booking.id)) {
-    throw new Error(`Booking with id "${booking.id}" already exists`);
+export function addBooking(groupId: number, booking: Booking): void {
+  const config = readConfig();
+  const group = config.groups.find((g) => g.telegramGroupId === groupId);
+  if (!group) throw new Error(`No group with ID ${groupId}`);
+  if (group.bookings.some((b) => b.id === booking.id)) {
+    throw new Error(`Booking "${booking.id}" already exists`);
   }
-  all.push(booking);
-  writeBookings(all);
+  group.bookings.push(booking);
+  writeConfig(config);
 }
 
-export function updateBooking(id: string, updates: Partial<Booking>): void {
-  const all = readBookings();
-  const idx = all.findIndex((b) => b.id === id);
-  if (idx === -1) throw new Error(`Booking "${id}" not found`);
-  all[idx] = { ...all[idx], ...updates };
-  writeBookings(all);
-}
-
-export function linkGuest(bookingId: string, telegramId: number): void {
-  updateBooking(bookingId, {
-    guestTelegramId: telegramId,
-    status: 'active',
-  });
-}
-
-export function addGroupMapping(mapping: GroupMapping): void {
-  const all = readMappings();
-  const existing = all.findIndex((m) => m.telegramGroupId === mapping.telegramGroupId);
-  if (existing !== -1) {
-    all[existing] = mapping;
-  } else {
-    all.push(mapping);
+export function updateBooking(bookingId: string, updates: Partial<Booking>): void {
+  const config = readConfig();
+  for (const group of config.groups) {
+    const idx = group.bookings.findIndex((b) => b.id === bookingId);
+    if (idx !== -1) {
+      group.bookings[idx] = { ...group.bookings[idx], ...updates };
+      writeConfig(config);
+      return;
+    }
   }
-  writeMappings(all);
-}
-
-export function getGroupMapping(groupId: number): GroupMapping | undefined {
-  return readMappings().find((m) => m.telegramGroupId === groupId);
+  throw new Error(`Booking "${bookingId}" not found`);
 }

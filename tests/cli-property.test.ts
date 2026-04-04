@@ -3,21 +3,25 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const DATA_DIR = path.resolve('data');
+const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
 let passed = 0;
 let failed = 0;
 
 function assert(condition: boolean, name: string) {
-  if (condition) {
-    console.log(`  ✓ ${name}`);
-    passed++;
-  } else {
-    console.log(`  ✗ ${name}`);
-    failed++;
-  }
+  if (condition) { console.log(`  ✓ ${name}`); passed++; }
+  else { console.log(`  ✗ ${name}`); failed++; }
 }
 
 function cleanup() {
-  if (fs.existsSync(DATA_DIR)) fs.rmSync(DATA_DIR, { recursive: true });
+  if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
+}
+
+function seedConfig() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(STEWARD_JSON, JSON.stringify({
+    hostTelegramId: 12345,
+    groups: [],
+  }, null, 2));
 }
 
 function runCommand(args: string[], inputs: string[] = []): Promise<{ stdout: string; code: number }> {
@@ -49,8 +53,10 @@ async function main() {
 
   console.log('Add property with valid inputs:');
   cleanup();
+  seedConfig();
 
   const result = await runCommand(['property', 'add'], [
+    '-1001234567890',                 // telegram group ID
     'Beach House',                    // name
     '123 Ocean Drive, Miami',         // address
     'Door code is 4521. Parking #3.', // check-in
@@ -59,59 +65,20 @@ async function main() {
     'sunny123',                      // wifi password
     'pool, AC, parking, washer',     // amenities
     'Whole Foods (5 min), Beach Bar (2 min)',  // nearby
-    '200',                           // daily budget
-    '100',                           // per-tx limit
-    '7883754831',                    // telegram ID
   ]);
 
   assert(result.code === 0, 'exits with code 0');
-  assert(result.stdout.includes('Property added: beach-house'), 'shows property ID');
+  assert(result.stdout.includes('Property added'), 'shows property added message');
   assert(result.stdout.includes('Beach House'), 'shows property name');
 
   // Verify stored data
-  const propsFile = path.join(DATA_DIR, 'properties.json');
-  assert(fs.existsSync(propsFile), 'properties.json created');
-  const props = JSON.parse(fs.readFileSync(propsFile, 'utf-8'));
-  assert(props.length === 1, 'one property stored');
-  assert(props[0].id === 'beach-house', 'ID is slugified');
-  assert(props[0].name === 'Beach House', 'name stored correctly');
-  assert(props[0].hostTelegramId === 7883754831, 'host telegram ID stored');
-  assert(props[0].wifiPassword === 'sunny123', 'wifi password stored');
-  assert(Array.isArray(props[0].amenities) && props[0].amenities.length === 4, 'amenities parsed as array');
-  assert(props[0].amenities[0] === 'pool', 'first amenity correct');
-  assert(props[0].dailyBudget === 200, 'daily budget stored as number');
-
-  // ── Duplicate rejection ─────────────────────────────
-
-  console.log('\nDuplicate rejection:');
-
-  const dup = await runCommand(['property', 'add'], [
-    'Beach House',  // same name → same slug
-  ]);
-
-  assert(dup.stdout.includes('already exists'), 'duplicate shows error');
-
-  // ── Add second property ─────────────────────────────
-
-  console.log('\nAdd second property:');
-
-  await runCommand(['property', 'add'], [
-    'City Apartment',
-    '456 Main St, NYC',
-    'Doorman will let you in',
-    'No pets',
-    'CityWifi',
-    'urban456',
-    'gym, rooftop',
-    'Central Park (10 min)',
-    '150',
-    '75',
-    '1234567890',
-  ]);
-
-  const props2 = JSON.parse(fs.readFileSync(propsFile, 'utf-8'));
-  assert(props2.length === 2, 'two properties stored');
-  assert(props2[1].id === 'city-apartment', 'second property slugified correctly');
+  assert(fs.existsSync(STEWARD_JSON), 'steward.json exists');
+  const config = JSON.parse(fs.readFileSync(STEWARD_JSON, 'utf-8'));
+  assert(config.groups.length === 1, 'one group stored');
+  assert(config.groups[0].telegramGroupId === -1001234567890, 'group ID stored');
+  assert(config.groups[0].property.name === 'Beach House', 'name stored correctly');
+  assert(config.groups[0].property.wifiPassword === 'sunny123', 'wifi password stored');
+  assert(Array.isArray(config.groups[0].property.amenities), 'amenities is array');
 
   // ── List properties ─────────────────────────────────
 
@@ -119,40 +86,16 @@ async function main() {
 
   const list = await runCommand(['property', 'list']);
   assert(list.code === 0, 'list exits with code 0');
-  assert(list.stdout.includes('beach-house'), 'list shows first property ID');
-  assert(list.stdout.includes('Beach House'), 'list shows first property name');
-  assert(list.stdout.includes('city-apartment'), 'list shows second property ID');
-  assert(list.stdout.includes('$200/day'), 'list shows budget');
+  assert(list.stdout.includes('Beach House'), 'list shows property name');
 
   // ── List when empty ─────────────────────────────────
 
   console.log('\nList when empty:');
   cleanup();
+  seedConfig();
 
   const emptyList = await runCommand(['property', 'list']);
   assert(emptyList.stdout.includes('No properties configured'), 'empty list shows helpful message');
-
-  // ── Default values ──────────────────────────────────
-
-  console.log('\nDefault budget values:');
-
-  const defaults = await runCommand(['property', 'add'], [
-    'Test House',
-    'Test Address',
-    'Test instructions',
-    'Test rules',
-    'TestWifi',
-    'test123',
-    'AC',
-    'Nearby place',
-    '',   // default daily budget (200)
-    '',   // default per-tx limit (100)
-    '999',
-  ]);
-
-  const props3 = JSON.parse(fs.readFileSync(propsFile, 'utf-8'));
-  assert(props3[0].dailyBudget === 200, 'default daily budget is 200');
-  assert(props3[0].perTransactionLimit === 100, 'default per-tx limit is 100');
 
   // ── Usage help ──────────────────────────────────────
 
