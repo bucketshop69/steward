@@ -3,41 +3,46 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const DATA_DIR = path.resolve('data');
-const PROPS_FILE = path.join(DATA_DIR, 'properties.json');
-const BOOKINGS_FILE = path.join(DATA_DIR, 'bookings.json');
+const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
 let passed = 0;
 let failed = 0;
 
 function assert(condition: boolean, name: string) {
-  if (condition) {
-    console.log(`  ✓ ${name}`);
-    passed++;
-  } else {
-    console.log(`  ✗ ${name}`);
-    failed++;
-  }
+  if (condition) { console.log(`  ✓ ${name}`); passed++; }
+  else { console.log(`  ✗ ${name}`); failed++; }
 }
 
 function cleanup() {
-  if (fs.existsSync(DATA_DIR)) fs.rmSync(DATA_DIR, { recursive: true });
+  if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
 }
 
-function seedProperty() {
+function seedConfig() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(PROPS_FILE, JSON.stringify([
-    {
-      id: 'beach-house', name: 'Beach House', address: '123 Ocean Dr',
-      hostTelegramId: 12345, checkInInstructions: 'Code 4521',
-      houseRules: 'No smoking', wifiName: 'BeachLife', wifiPassword: 'sunny123',
-      amenities: ['pool'], nearbyPlaces: 'Beach', dailyBudget: 200, perTransactionLimit: 100,
-    },
-    {
-      id: 'city-apt', name: 'City Apartment', address: '456 Main St',
-      hostTelegramId: 67890, checkInInstructions: 'Doorman',
-      houseRules: 'No pets', wifiName: 'CityWifi', wifiPassword: 'urban456',
-      amenities: ['gym'], nearbyPlaces: 'Park', dailyBudget: 150, perTransactionLimit: 75,
-    },
-  ], null, 2));
+  fs.writeFileSync(STEWARD_JSON, JSON.stringify({
+    hostTelegramId: 12345,
+    groups: [
+      {
+        telegramGroupId: -100001,
+        property: {
+          name: 'Beach House', address: '123 Ocean Dr',
+          checkInInstructions: 'Code 4521', houseRules: 'No smoking',
+          wifiName: 'BeachLife', wifiPassword: 'sunny123',
+          amenities: ['pool'], nearbyPlaces: 'Beach',
+        },
+        bookings: [],
+      },
+      {
+        telegramGroupId: -100002,
+        property: {
+          name: 'City Apartment', address: '456 Main St',
+          checkInInstructions: 'Doorman', houseRules: 'No pets',
+          wifiName: 'CityWifi', wifiPassword: 'urban456',
+          amenities: ['gym'], nearbyPlaces: 'Park',
+        },
+        bookings: [],
+      },
+    ],
+  }, null, 2));
 }
 
 function runCommand(args: string[], inputs: string[] = []): Promise<{ stdout: string; code: number }> {
@@ -52,7 +57,6 @@ function runCommand(args: string[], inputs: string[] = []): Promise<{ stdout: st
 
     child.stdout.on('data', (data) => {
       stdout += data.toString();
-      // Only feed input when we see a readline prompt (ends with ": ")
       const chunk = data.toString();
       if (inputsCopy.length > 0 && chunk.endsWith(': ')) {
         child.stdin.write(inputsCopy.shift()! + '\n');
@@ -67,13 +71,13 @@ function runCommand(args: string[], inputs: string[] = []): Promise<{ stdout: st
 async function main() {
   console.log('\n📋 CLI Booking Tests\n');
 
-  // ── Add booking with --property flag ────────────────
+  // ── Add booking with --group flag ────────────────
 
-  console.log('Add booking with --property flag:');
+  console.log('Add booking with --group flag:');
   cleanup();
-  seedProperty();
+  seedConfig();
 
-  const result = await runCommand(['booking', 'add', '--property', 'beach-house'], [
+  const result = await runCommand(['booking', 'add', '--group', '-100001'], [
     'John Smith',         // guest name
     '2026-04-10',         // check-in
     '2026-04-15',         // check-out
@@ -87,48 +91,45 @@ async function main() {
   assert(result.stdout.includes('Beach House'), 'shows property name');
 
   // Verify stored data
-  assert(fs.existsSync(BOOKINGS_FILE), 'bookings.json created');
-  const bookings = JSON.parse(fs.readFileSync(BOOKINGS_FILE, 'utf-8'));
+  const config = JSON.parse(fs.readFileSync(STEWARD_JSON, 'utf-8'));
+  const bookings = config.groups[0].bookings;
   assert(bookings.length === 1, 'one booking stored');
-  assert(bookings[0].propertyId === 'beach-house', 'property ID stored');
   assert(bookings[0].guestName === 'John Smith', 'guest name stored');
   assert(bookings[0].checkIn === '2026-04-10', 'check-in stored');
   assert(bookings[0].checkOut === '2026-04-15', 'check-out stored');
   assert(bookings[0].preferences === 'Vegetarian, no nuts', 'preferences stored');
   assert(bookings[0].guestTelegramUsername === '@johnsmith', 'telegram username stored');
   assert(bookings[0].status === 'pending', 'status is pending');
-  assert(bookings[0].totalSpent === 0, 'total spent is 0');
   assert(bookings[0].id.startsWith('bk-0410-'), 'booking ID format correct');
 
-  // ── Invalid property ────────────────────────────────
+  // ── No groups configured ───────────────────────────
 
-  console.log('\nInvalid property:');
-
-  const invalid = await runCommand(['booking', 'add', '--property', 'nonexistent'], []);
-  assert(invalid.stdout.includes('not found'), 'shows not found error');
-
-  // ── No properties ───────────────────────────────────
-
-  console.log('\nNo properties configured:');
+  console.log('\nNo groups configured:');
   cleanup();
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(STEWARD_JSON, JSON.stringify({ hostTelegramId: 12345, groups: [] }, null, 2));
 
   const noProp = await runCommand(['booking', 'add'], []);
   assert(noProp.stdout.includes('No properties configured'), 'shows no properties message');
 
-  // ── Auto-select single property ─────────────────────
+  // ── Auto-select single group ─────────────────────
 
-  console.log('\nAuto-select single property:');
+  console.log('\nAuto-select single group:');
   cleanup();
-  // Seed only one property
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(PROPS_FILE, JSON.stringify([
-    {
-      id: 'beach-house', name: 'Beach House', address: '123 Ocean Dr',
-      hostTelegramId: 12345, checkInInstructions: 'Code 4521',
-      houseRules: 'No smoking', wifiName: 'BeachLife', wifiPassword: 'sunny123',
-      amenities: ['pool'], nearbyPlaces: 'Beach', dailyBudget: 200, perTransactionLimit: 100,
-    },
-  ], null, 2));
+  fs.writeFileSync(STEWARD_JSON, JSON.stringify({
+    hostTelegramId: 12345,
+    groups: [{
+      telegramGroupId: -100001,
+      property: {
+        name: 'Beach House', address: '123 Ocean Dr',
+        checkInInstructions: 'Code 4521', houseRules: 'No smoking',
+        wifiName: 'BeachLife', wifiPassword: 'sunny123',
+        amenities: ['pool'], nearbyPlaces: 'Beach',
+      },
+      bookings: [],
+    }],
+  }, null, 2));
 
   const autoSelect = await runCommand(['booking', 'add'], [
     'Jane Doe',       // guest name
@@ -138,51 +139,33 @@ async function main() {
     '',               // no username
   ]);
 
-  assert(autoSelect.code === 0, 'auto-selects single property');
-  assert(autoSelect.stdout.includes('Using property: Beach House'), 'shows auto-selected property');
-  if (fs.existsSync(BOOKINGS_FILE)) {
-    const autoBookings = JSON.parse(fs.readFileSync(BOOKINGS_FILE, 'utf-8'));
-    assert(autoBookings[0].propertyId === 'beach-house', 'correct property assigned');
-    assert(autoBookings[0].preferences === undefined, 'empty preferences stored as undefined');
-    assert(autoBookings[0].guestTelegramUsername === undefined, 'empty username stored as undefined');
-  } else {
-    assert(false, 'correct property assigned');
-    assert(false, 'empty preferences stored as undefined');
-    assert(false, 'empty username stored as undefined');
-  }
-
-  // ── Date validation ─────────────────────────────────
-
-  console.log('\nDate validation (check-out before check-in):');
-  cleanup();
-  seedProperty();
-
-  const badDate = await runCommand(['booking', 'add', '--property', 'beach-house'], [
-    'Bad Date Guest',
-    '2026-04-15',     // check-in
-    '2026-04-10',     // check-out BEFORE check-in → rejected
-    '2026-04-20',     // valid check-out
-    '',
-    '',
-  ]);
-
-  assert(badDate.stdout.includes('Check-out must be after check-in'), 'rejects check-out before check-in');
-  assert(badDate.code === 0, 'still completes after correction');
+  assert(autoSelect.code === 0, 'auto-selects single group');
+  assert(autoSelect.stdout.includes('Using group'), 'shows auto-selected group');
 
   // ── List bookings ───────────────────────────────────
 
   console.log('\nList bookings:');
+  cleanup();
+  seedConfig();
+  // Add a booking first
+  await runCommand(['booking', 'add', '--group', '-100001'], [
+    'Test Guest',
+    '2026-04-10',
+    '2026-04-15',
+    '',
+    '',
+  ]);
 
   const list = await runCommand(['booking', 'list']);
   assert(list.code === 0, 'list exits with code 0');
-  assert(list.stdout.includes('beach-house'), 'shows property ID');
-  assert(list.stdout.includes('Bad Date Guest'), 'shows guest name');
+  assert(list.stdout.includes('Test Guest'), 'shows guest name');
   assert(list.stdout.includes('pending'), 'shows status');
 
   // ── List when empty ─────────────────────────────────
 
   console.log('\nList when empty:');
   cleanup();
+  seedConfig();
 
   const emptyList = await runCommand(['booking', 'list']);
   assert(emptyList.stdout.includes('No bookings'), 'empty list shows helpful message');

@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { PluginParams, WalletService, Property } from '../src/types.js';
+import type { PluginParams, Property } from '../src/types.js';
 
 const DATA_DIR = path.resolve('data');
+const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
 let passed = 0;
 let failed = 0;
 
@@ -12,19 +13,14 @@ function assert(condition: boolean, name: string) {
 }
 
 function cleanup() {
-  if (fs.existsSync(DATA_DIR)) fs.rmSync(DATA_DIR, { recursive: true });
+  if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
 }
 
-const mockWallet: WalletService = {
-  async getBalance() { return 1000; },
-  async payX402() { return { tx: 'mock_pay_test' }; },
-};
-
 const testProperty: Property = {
-  id: 'beach-house', name: 'Beach House', address: '123 Ocean Dr',
-  hostTelegramId: 12345, checkInInstructions: 'Code 4521',
-  houseRules: 'No smoking', wifiName: 'BeachLife', wifiPassword: 'sunny123',
-  amenities: ['pool'], nearbyPlaces: 'Beach', dailyBudget: 200, perTransactionLimit: 100,
+  name: 'Beach House', address: '123 Ocean Dr',
+  checkInInstructions: 'Code 4521', houseRules: 'No smoking',
+  wifiName: 'BeachLife', wifiPassword: 'sunny123',
+  amenities: ['pool'], nearbyPlaces: 'Beach',
 };
 
 function makeParams(request: Record<string, unknown>): PluginParams {
@@ -32,8 +28,6 @@ function makeParams(request: Record<string, unknown>): PluginParams {
     guest: { name: 'John', telegramId: 22222, preferences: 'Vegetarian, no nuts' },
     property: testProperty,
     request: JSON.stringify(request),
-    wallet: mockWallet,
-    mock: true,
   };
 }
 
@@ -47,20 +41,18 @@ assert(foodPlugin.name === 'food-delivery', 'name is food-delivery');
 assert(foodPlugin.triggers.includes('pizza'), 'triggers include pizza');
 
 const foodResult = await foodPlugin.handle(makeParams({ cuisine: 'Thai', people: 2, dietary: 'no nuts' }));
-assert(foodResult.message.includes('Thai'), 'response mentions cuisine');
-assert(foodResult.message.includes('USDC'), 'response mentions USDC');
-assert(foodResult.transaction !== undefined, 'has transaction');
-assert(foodResult.transaction!.amount > 0, 'transaction has amount');
-assert(foodResult.transaction!.tx!.startsWith('mock_food_'), 'mock tx has food prefix');
+const foodQuote = JSON.parse(foodResult.message);
+assert(foodQuote.type === 'quote', 'food returns a quote');
+assert(Array.isArray(foodQuote.restaurants), 'quote has restaurants array');
+assert(foodQuote.restaurants.length > 0, 'at least one restaurant returned');
+assert(foodQuote.restaurants[0].menu.length > 0, 'restaurant has menu items');
+assert(foodQuote.restaurants[0].menu[0].price > 0, 'menu items have prices');
 
-// Cost estimation
-const cheapResult = await foodPlugin.handle(makeParams({ cuisine: 'pizza', people: 1 }));
-const premiumResult = await foodPlugin.handle(makeParams({ cuisine: 'sushi', people: 1 }));
-assert(premiumResult.transaction!.amount > cheapResult.transaction!.amount, 'premium cuisine costs more');
-
-// Multi-person
-const multiResult = await foodPlugin.handle(makeParams({ cuisine: 'pizza', people: 4 }));
-assert(multiResult.transaction!.amount > cheapResult.transaction!.amount, 'more people costs more');
+// Multi-person pricing
+const multiFood = await foodPlugin.handle(makeParams({ cuisine: 'pizza', people: 4 }));
+const multiQuote = JSON.parse(multiFood.message);
+assert(multiQuote.people === 4, 'people count preserved in quote');
+assert(multiQuote.restaurants[0].menu[0].priceForGroup > multiQuote.restaurants[0].menu[0].price, 'group price > single price');
 
 // ── Cleaning Plugin ─────────────────────────────────
 
@@ -70,17 +62,15 @@ const { cleaningPlugin } = await import('../src/plugins/cleaning.js');
 
 assert(cleaningPlugin.name === 'cleaning', 'name is cleaning');
 
-const stdClean = await cleaningPlugin.handle(makeParams({ type: 'standard', date: 'tomorrow' }));
-assert(stdClean.message.includes('Standard'), 'standard cleaning message');
-assert(stdClean.transaction!.amount === 50, 'standard costs $50');
-assert(stdClean.transaction!.tx!.startsWith('mock_clean_'), 'mock tx has clean prefix');
-
-const deepClean = await cleaningPlugin.handle(makeParams({ type: 'deep', date: '2026-04-15' }));
-assert(deepClean.transaction!.amount === 120, 'deep costs $120');
-
-// With notes
-const notesClean = await cleaningPlugin.handle(makeParams({ type: 'standard', date: 'today', notes: 'Extra focus on bathroom' }));
-assert(notesClean.message.includes('bathroom'), 'notes included in message');
+const cleanResult = await cleaningPlugin.handle(makeParams({ type: 'standard', date: 'tomorrow' }));
+const cleanQuote = JSON.parse(cleanResult.message);
+assert(cleanQuote.type === 'quote', 'cleaning returns a quote');
+assert(Array.isArray(cleanQuote.options), 'has options array');
+assert(cleanQuote.options.length === 3, 'has 3 cleaning packages');
+assert(cleanQuote.options.some((o: any) => o.type === 'Standard Clean'), 'has Standard Clean option');
+assert(cleanQuote.options.some((o: any) => o.type === 'Deep Clean'), 'has Deep Clean option');
+assert(cleanQuote.options[1].price === 50, 'standard costs $50');
+assert(cleanQuote.options[2].price === 120, 'deep costs $120');
 
 // ── Taxi Plugin ─────────────────────────────────────
 
@@ -91,18 +81,16 @@ const { taxiPlugin } = await import('../src/plugins/taxi.js');
 assert(taxiPlugin.name === 'taxi', 'name is taxi');
 
 const airportTaxi = await taxiPlugin.handle(makeParams({ destination: 'airport', time: '3pm' }));
-assert(airportTaxi.transaction!.amount === 50, 'airport costs $50');
-assert(airportTaxi.message.includes('airport'), 'mentions destination');
-assert(airportTaxi.message.includes('3pm'), 'mentions time');
+const airportQuote = JSON.parse(airportTaxi.message);
+assert(airportQuote.type === 'quote', 'taxi returns a quote');
+assert(Array.isArray(airportQuote.options), 'has ride options');
+assert(airportQuote.options.length > 0, 'at least one ride option');
+assert(airportQuote.destination === 'airport', 'destination in response');
+assert(airportQuote.options[0].price > 0, 'ride has a price');
 
 const beachTaxi = await taxiPlugin.handle(makeParams({ destination: 'beach' }));
-assert(beachTaxi.transaction!.amount === 15, 'beach costs $15');
-
-const defaultTaxi = await taxiPlugin.handle(makeParams({ destination: 'some random place' }));
-assert(defaultTaxi.transaction!.amount === 25, 'default costs $25');
-
-const multiPassenger = await taxiPlugin.handle(makeParams({ destination: 'downtown', people: 3 }));
-assert(multiPassenger.message.includes('3 passengers'), 'shows passenger count');
+const beachQuote = JSON.parse(beachTaxi.message);
+assert(beachQuote.options[0].price < airportQuote.options[0].price, 'beach cheaper than airport');
 
 // ── Tickets Plugin ──────────────────────────────────
 
@@ -112,16 +100,13 @@ const { ticketsPlugin } = await import('../src/plugins/tickets.js');
 
 assert(ticketsPlugin.name === 'tickets', 'name is tickets');
 
-const museumTicket = await ticketsPlugin.handle(makeParams({ event: 'museum visit', people: 2 }));
-assert(museumTicket.transaction!.amount === 40, 'museum 2 people = $40');
-assert(museumTicket.message.includes('2 tickets'), 'shows ticket count');
-
-const concertTicket = await ticketsPlugin.handle(makeParams({ event: 'concert', people: 1, date: 'Friday' }));
-assert(concertTicket.transaction!.amount === 60, 'concert = $60');
-assert(concertTicket.message.includes('Friday'), 'shows date');
-
-const defaultEvent = await ticketsPlugin.handle(makeParams({ event: 'local experience', people: 1 }));
-assert(defaultEvent.transaction!.amount === 30, 'default = $30');
+const museumTicket = await ticketsPlugin.handle(makeParams({ event: 'museum', people: 2 }));
+const museumQuote = JSON.parse(museumTicket.message);
+assert(museumQuote.type === 'quote', 'tickets returns a quote');
+assert(Array.isArray(museumQuote.options), 'has activity options');
+assert(museumQuote.options.length > 0, 'at least one activity');
+assert(museumQuote.options[0].totalPrice > 0, 'has total price');
+assert(museumQuote.people === 2, 'people count preserved');
 
 // ── Maintenance Plugin ──────────────────────────────
 
@@ -131,16 +116,13 @@ const { maintenancePlugin } = await import('../src/plugins/maintenance.js');
 
 assert(maintenancePlugin.name === 'maintenance', 'name is maintenance');
 
-// With troubleshooting available
 const acIssue = await maintenancePlugin.handle(makeParams({ issue: 'AC not working', location: 'bedroom' }));
 assert(acIssue.message.includes('reset button'), 'suggests AC troubleshooting');
 assert(acIssue.message.includes('bedroom'), 'mentions location');
-assert(acIssue.transaction === undefined, 'no transaction for maintenance');
 
 const wifiIssue = await maintenancePlugin.handle(makeParams({ issue: 'wifi is down' }));
 assert(wifiIssue.message.includes('router'), 'suggests WiFi troubleshooting');
 
-// Without troubleshooting — escalates
 const unknownIssue = await maintenancePlugin.handle(makeParams({ issue: 'strange noise from ceiling', severity: 'major' }));
 assert(unknownIssue.message.includes('⚠️'), 'major severity has warning emoji');
 assert(unknownIssue.message.includes('escalate'), 'mentions escalation');
@@ -167,24 +149,15 @@ assert(schemas.some(s => s.name === 'book_taxi'), 'has book_taxi schema');
 assert(schemas.some(s => s.name === 'book_tickets'), 'has book_tickets schema');
 assert(schemas.some(s => s.name === 'report_maintenance'), 'has report_maintenance schema');
 
-// ── Registry executePlugin with transaction logging ──
+// ── Registry executePlugin ──────────────────────────
 
-console.log('\nPlugin execution with transaction logging:');
-cleanup();
-
-const { addProperty } = await import('../src/store/properties.js');
-addProperty(testProperty);
+console.log('\nPlugin execution:');
 
 const { executePlugin } = await import('../src/plugins/registry.js');
 const execResult = await executePlugin('food-delivery', makeParams({ cuisine: 'pizza', people: 1 }));
-assert(execResult.message.includes('pizza'), 'execution returns message');
-assert(execResult.transaction !== undefined, 'execution returns transaction');
-
-// Check transaction was logged
-const { listTransactions } = await import('../src/store/transactions.js');
-const txs = listTransactions('beach-house');
-assert(txs.length === 1, 'transaction auto-logged');
-assert(txs[0].plugin === 'food-delivery', 'logged with correct plugin name');
+const execQuote = JSON.parse(execResult.message);
+assert(execQuote.type === 'quote', 'execution returns quote');
+assert(execQuote.restaurants.length > 0, 'execution returns restaurants');
 
 cleanup();
 
