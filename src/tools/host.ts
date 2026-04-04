@@ -18,7 +18,10 @@ export function addPropertyTool(input: {
   wifi_password: string;
   amenities: string[];
   nearby_places: string;
-}): { success: boolean; error?: string } {
+}): { success: boolean; group_id?: number; error?: string } {
+  // Telegram group IDs are always negative — fix if the LLM passes a positive number
+  const groupId = input.telegram_group_id > 0 ? -input.telegram_group_id : input.telegram_group_id;
+
   const property: Property = {
     name: input.name,
     address: input.address,
@@ -31,8 +34,8 @@ export function addPropertyTool(input: {
   };
 
   try {
-    storeAddProperty(input.telegram_group_id, property);
-    return { success: true };
+    storeAddProperty(groupId, property);
+    return { success: true, group_id: groupId };
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
@@ -46,6 +49,9 @@ export function addBookingTool(input: {
   preferences?: string;
   guest_telegram_username?: string;
 }): { success: boolean; booking_id?: string; error?: string } {
+  // Telegram group IDs are always negative
+  const groupId = input.group_id > 0 ? -input.group_id : input.group_id;
+
   const mmdd = input.check_in.slice(5, 7) + input.check_in.slice(8, 10);
   const rand = Math.random().toString(36).slice(2, 6);
   const id = `bk-${mmdd}-${rand}`;
@@ -61,7 +67,7 @@ export function addBookingTool(input: {
   };
 
   try {
-    storeAddBooking(input.group_id, booking);
+    storeAddBooking(groupId, booking);
     return { success: true, booking_id: id };
   } catch (err) {
     return { success: false, error: (err as Error).message };
