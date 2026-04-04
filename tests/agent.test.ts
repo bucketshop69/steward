@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { setConfigFile, resetConfigFile } from '../src/store/steward.js';
 
 const DATA_DIR = path.resolve('data');
+const STEWARD_TEST_JSON = path.join(DATA_DIR, 'steward.test.json');
 let passed = 0;
 let failed = 0;
 
@@ -10,9 +12,8 @@ function assert(condition: boolean, name: string) {
   else { console.log(`  ✗ ${name}`); failed++; }
 }
 
-function cleanup() {
-  if (fs.existsSync(DATA_DIR)) fs.rmSync(DATA_DIR, { recursive: true });
-}
+// Use test config file (don't nuke data/)
+setConfigFile(STEWARD_TEST_JSON);
 
 console.log('\n🧠 Agent Tests\n');
 
@@ -82,9 +83,19 @@ console.log('\nHistory trimming:');
 assert(agentSource.includes('history.length > 40'), 'trims history at 40 messages');
 assert(agentSource.includes('history.slice(-40)'), 'keeps last 40 messages');
 
+// ── Host agent integration ─────��────────────────────
+
+console.log('\nHost agent:');
+const hostAgentSource = fs.readFileSync(path.resolve('src/host-agent.ts'), 'utf-8');
+assert(hostAgentSource.includes('processHostMessage'), 'host agent has processHostMessage');
+assert(hostAgentSource.includes('add_property'), 'host agent has add_property tool');
+assert(hostAgentSource.includes('add_booking'), 'host agent has add_booking tool');
+assert(hostAgentSource.includes('get_status'), 'host agent has get_status tool');
+
 // ── Cleanup ─────────────────────────────────────────
 
-cleanup();
+if (fs.existsSync(STEWARD_TEST_JSON)) fs.unlinkSync(STEWARD_TEST_JSON);
+resetConfigFile();
 
 console.log(`\n${'─'.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);

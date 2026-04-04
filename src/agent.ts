@@ -38,10 +38,11 @@ PAYMENT FLOW — this is critical:
 Rules:
 - On every message, first call get_property_by_group to know which property this is
 - Then call identify_user to know who you're talking to
+- Guests are auto-linked when they join the group — no need to ask them to confirm identity
+- If identify_user returns "unknown", treat them as the guest anyway and be helpful
 - NEVER tell the guest an order is placed until payment is confirmed
 - For maintenance issues, try simple troubleshooting first, then escalate
-- Be friendly, helpful, and concise — this is a chat, not an email
-- When a new guest confirms their identity, call link_guest to connect them to their booking`;
+- Be friendly, helpful, and concise — this is a chat, not an email`;
 }
 
 const TOOL_DEFINITIONS: AnthropicToolDefinition[] = [

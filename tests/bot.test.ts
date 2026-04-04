@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { writeConfig } from '../src/store/steward.js';
+import { writeConfig, setConfigFile, resetConfigFile } from '../src/store/steward.js';
 
+const DATA_DIR = path.resolve('data');
+const STEWARD_TEST_JSON = path.join(DATA_DIR, 'steward.test.json');
 let passed = 0;
 let failed = 0;
 
@@ -9,6 +11,9 @@ function assert(condition: boolean, name: string) {
   if (condition) { console.log(`  ✓ ${name}`); passed++; }
   else { console.log(`  ✗ ${name}`); failed++; }
 }
+
+// Use test config file
+setConfigFile(STEWARD_TEST_JSON);
 
 console.log('\n🤖 Bot Logic Tests\n');
 
@@ -85,9 +90,7 @@ assert(bot.startBot.length === 1, 'startBot takes 1 argument (options)');
 
 console.log('\nStore integration for host commands:');
 
-const DATA_DIR = path.resolve('data');
-const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
-if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
+if (fs.existsSync(STEWARD_TEST_JSON)) fs.unlinkSync(STEWARD_TEST_JSON);
 
 writeConfig({
   hostTelegramId: 12345,
@@ -117,7 +120,8 @@ const booking = getActiveBooking(67890);
 assert(booking?.guestName === 'John Test', 'active booking found');
 
 // Cleanup
-if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
+if (fs.existsSync(STEWARD_TEST_JSON)) fs.unlinkSync(STEWARD_TEST_JSON);
+resetConfigFile();
 
 // ── Results ─────────────────────────────────────────
 

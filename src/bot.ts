@@ -1,7 +1,8 @@
 import { Bot, Context, GrammyError, HttpError } from 'grammy';
 import { getPropertyByGroupId, getHostTelegramId } from './store/properties.js';
-import { getBookingByGroupId, getActiveBooking } from './store/bookings.js';
+import { getBookingByGroupId, getActiveBooking, listBookings, updateBooking } from './store/bookings.js';
 import { processMessage } from './agent.js';
+import { processHostMessage } from './host-agent.js';
 import { checkLifecycleEvents } from './lifecycle.js';
 import { readConfig } from './store/steward.js';
 
@@ -70,7 +71,7 @@ export async function startBot(options: BotOptions): Promise<void> {
     );
   });
 
-  // New member detection (guest onboarding)
+  // New member detection (guest auto-link)
   bot.on('message:new_chat_members', async (ctx) => {
     const groupId = ctx.chat.id;
     const property = getPropertyByGroupId(groupId);
@@ -79,15 +80,31 @@ export async function startBot(options: BotOptions): Promise<void> {
     const newMembers = ctx.message.new_chat_members;
     for (const member of newMembers) {
       if (member.is_bot) continue;
+      if (isHostMessage(member.id)) continue;
 
-      const booking = getActiveBooking(groupId);
+      // Auto-link: find a pending or active booking and attach this guest
+      const bookings = listBookings(groupId);
+      const pendingBooking = bookings.find((b) => b.status === 'pending');
+      const activeBooking = bookings.find((b) => b.status === 'active');
+      const booking = pendingBooking ?? activeBooking;
 
       if (booking) {
+        // Auto-link guest to booking
+        if (!booking.guestTelegramId) {
+          updateBooking(booking.id, {
+            guestTelegramId: member.id,
+            status: 'active',
+          });
+          console.log(`👤 Auto-linked ${member.first_name} (${member.id}) to booking ${booking.id}`);
+        }
+
         await ctx.reply(
-          `Welcome to ${property.name}! I'm Steward, your property assistant.\n\n` +
-          `I can help with check-in, local recommendations, food orders, transport, ` +
-          `and anything else you need during your stay.\n\n` +
-          `Are you ${booking.guestName}? (Just confirming so I can load your booking.)`
+          `Welcome to ${property.name}, ${booking.guestName}! I'm Steward, your property assistant.\n\n` +
+          `I can help with check-in info, food orders, transport, cleaning, and anything else you need.\n\n` +
+          `📍 Check-in: ${property.checkInInstructions}\n` +
+          `📶 WiFi: ${property.wifiName} / ${property.wifiPassword}\n` +
+          `📋 Rules: ${property.houseRules}\n\n` +
+          `Just ask if you need anything!`
         );
       } else {
         await ctx.reply(
@@ -99,14 +116,31 @@ export async function startBot(options: BotOptions): Promise<void> {
     }
   });
 
-  // Main message handler (text messages in groups)
+  // Main message handler (text messages)
   bot.on('message:text', async (ctx) => {
-    const groupId = ctx.chat.id;
+    const chatId = ctx.chat.id;
     const senderId = ctx.from.id;
     const text = ctx.message.text;
 
-    // Only handle group/supergroup messages
+    // Host DM mode — private messages from the host
+    if (ctx.chat.type === 'private' && isHostMessage(senderId)) {
+      console.log(`🏠 Host DM: "${text.slice(0, 80)}"`);
+      try {
+        const response = await processHostMessage(text);
+        if (response) {
+          await ctx.reply(response);
+        }
+      } catch (err) {
+        console.error('Host agent error:', err);
+        await ctx.reply('Sorry, I ran into an issue. Please try again.');
+      }
+      return;
+    }
+
+    // Only handle group/supergroup messages from here
     if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') return;
+
+    const groupId = chatId;
 
     // Look up property for this group
     const property = getPropertyByGroupId(groupId);
@@ -188,9 +222,24 @@ export async function startBot(options: BotOptions): Promise<void> {
     }
   }
 
+  // Lifecycle timer — check for check-in/check-out events every 15 minutes
+  const LIFECYCLE_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+  const lifecycleTimer = setInterval(async () => {
+    const msgs = checkLifecycleEvents();
+    for (const msg of msgs) {
+      try {
+        await bot.api.sendMessage(msg.groupId, msg.text);
+        console.log(`🔄 Lifecycle message sent to group ${msg.groupId}`);
+      } catch (err) {
+        console.error(`Failed to send lifecycle message to group ${msg.groupId}:`, (err as Error).message);
+      }
+    }
+  }, LIFECYCLE_INTERVAL_MS);
+
   // Graceful shutdown
   const shutdown = () => {
     console.log('\nShutting down Steward...');
+    clearInterval(lifecycleTimer);
     bot.stop();
     process.exit(0);
   };
