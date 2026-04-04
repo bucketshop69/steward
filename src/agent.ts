@@ -1,32 +1,48 @@
 import { callMinimax, type AnthropicMessage, type AnthropicToolDefinition, type ContentBlock } from './minimax.js';
 import { getPropertyByGroup, identifyUser, getBooking } from './tools/context.js';
 import { getPropertyInfo } from './tools/property.js';
-import { checkBudget, getTransactionHistory } from './tools/budget.js';
 import { linkGuest } from './tools/onboarding.js';
 import { escalateToHost } from './tools/escalate.js';
 import { executePlugin, getPluginToolSchemas } from './plugins/registry.js';
-import { createWalletService } from './wallet.js';
 import { saveHistory, loadHistory, loadSnapshot, saveSnapshot, generateSnapshot, buildContextMessages } from './memory.js';
 import { getBookingByGroupId } from './store/bookings.js';
-import { getTotalSpend } from './store/transactions.js';
 
 const MAX_TOOL_DEPTH = 10;
 
 // Per-group conversation history (in-memory)
 const conversationHistory = new Map<number, AnthropicMessage[]>();
 
-const SYSTEM_PROMPT = `You are Steward, an AI property host assistant. You manage short-term rental properties via Telegram groups. You help guests with check-in info, local recommendations, food orders, transport, cleaning, and anything else they need during their stay.
+// Resolved lazily on first use
+let _stewardWallet: string | null = null;
+async function getStewardWallet(): Promise<string> {
+  if (_stewardWallet) return _stewardWallet;
+  const { getWalletSolanaAddress } = await import('./wallet.js');
+  const walletName = process.env['OWS_WALLET_NAME'] ?? 'steward-main';
+  const address = await getWalletSolanaAddress(walletName);
+  if (!address) throw new Error(`OWS wallet "${walletName}" not found. Run: steward init`);
+  _stewardWallet = address;
+  return address;
+}
 
-You have access to tools to look up property info, check budgets, order services, and escalate to the host. You discover everything through tool calls — you know nothing upfront.
+function buildSystemPrompt(walletAddress: string): string {
+  return `You are Steward, an AI property host assistant. You manage short-term rental properties via Telegram groups. You help guests with check-in info, local recommendations, food orders, transport, cleaning, and anything else they need during their stay.
+
+You have access to tools to look up property info, order services, and escalate to the host. You discover everything through tool calls — you know nothing upfront.
+
+PAYMENT FLOW — this is critical:
+1. When a guest requests a paid service (food, taxi, tickets, cleaning), first call the plugin tool to get the price quote
+2. The plugin returns the cost. Tell the guest the price and ask them to send USDC to the steward wallet: ${walletAddress}
+3. When the guest confirms they've paid, call check_payment to verify the transaction
+4. Only after payment is confirmed, tell the guest their order is placed
 
 Rules:
 - On every message, first call get_property_by_group to know which property this is
 - Then call identify_user to know who you're talking to
-- Always check the budget before ordering any paid service
-- If a request exceeds the budget, tell the guest and escalate to the host
+- NEVER tell the guest an order is placed until payment is confirmed
 - For maintenance issues, try simple troubleshooting first, then escalate
 - Be friendly, helpful, and concise — this is a chat, not an email
 - When a new guest confirms their identity, call link_guest to connect them to their booking`;
+}
 
 const TOOL_DEFINITIONS: AnthropicToolDefinition[] = [
   {
@@ -47,21 +63,21 @@ const TOOL_DEFINITIONS: AnthropicToolDefinition[] = [
       type: 'object',
       properties: {
         telegram_id: { type: 'number', description: 'Sender Telegram user ID' },
-        property_id: { type: 'string', description: 'Property ID' },
+        group_id: { type: 'number', description: 'Telegram group ID' },
       },
-      required: ['telegram_id', 'property_id'],
+      required: ['telegram_id', 'group_id'],
     },
   },
   {
     name: 'get_booking',
-    description: 'Get current booking details including dates, preferences, and remaining budget.',
+    description: 'Get current booking details including dates and guest info.',
     input_schema: {
       type: 'object',
       properties: {
-        property_id: { type: 'string', description: 'Property ID' },
+        group_id: { type: 'number', description: 'Telegram group ID' },
         booking_id: { type: 'string', description: 'Specific booking ID (optional — defaults to active booking)' },
       },
-      required: ['property_id'],
+      required: ['group_id'],
     },
   },
   {
@@ -70,33 +86,9 @@ const TOOL_DEFINITIONS: AnthropicToolDefinition[] = [
     input_schema: {
       type: 'object',
       properties: {
-        property_id: { type: 'string', description: 'Property ID' },
+        group_id: { type: 'number', description: 'Telegram group ID' },
       },
-      required: ['property_id'],
-    },
-  },
-  {
-    name: 'check_budget',
-    description: 'Check if an amount is within the daily budget and per-transaction limit. Call before any paid service.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        property_id: { type: 'string', description: 'Property ID' },
-        amount: { type: 'number', description: 'Amount in USDC to check' },
-      },
-      required: ['property_id', 'amount'],
-    },
-  },
-  {
-    name: 'get_transaction_history',
-    description: 'Get spending log for a property, optionally filtered by booking.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        property_id: { type: 'string', description: 'Property ID' },
-        booking_id: { type: 'string', description: 'Filter by booking ID (optional)' },
-      },
-      required: ['property_id'],
+      required: ['group_id'],
     },
   },
   {
@@ -106,26 +98,36 @@ const TOOL_DEFINITIONS: AnthropicToolDefinition[] = [
       type: 'object',
       properties: {
         telegram_id: { type: 'number', description: 'Guest Telegram user ID' },
-        property_id: { type: 'string', description: 'Property ID' },
+        group_id: { type: 'number', description: 'Telegram group ID' },
         booking_ref: { type: 'string', description: 'Booking reference (optional — auto-finds pending booking)' },
       },
-      required: ['telegram_id', 'property_id'],
+      required: ['telegram_id', 'group_id'],
     },
   },
   {
     name: 'escalate_to_host',
-    description: 'Escalate an issue to the property host. Use when budget exceeded, maintenance needed, or you cannot resolve.',
+    description: 'Escalate an issue to the property host. Use when maintenance needed or you cannot resolve.',
     input_schema: {
       type: 'object',
       properties: {
-        property_id: { type: 'string', description: 'Property ID' },
+        group_id: { type: 'number', description: 'Telegram group ID' },
         reason: { type: 'string', description: 'Clear explanation of what needs host attention' },
         urgency: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Urgency level' },
       },
-      required: ['property_id', 'reason', 'urgency'],
+      required: ['group_id', 'reason', 'urgency'],
     },
   },
-  // Plugin tools are appended dynamically
+  {
+    name: 'check_payment',
+    description: 'Check if USDC payment was received in the steward wallet. Call when guest says they have paid.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        expected_amount: { type: 'number', description: 'Expected USDC amount' },
+      },
+      required: ['expected_amount'],
+    },
+  },
   ...getPluginToolSchemas(),
 ];
 
@@ -138,7 +140,7 @@ const PLUGIN_NAME_MAP: Record<string, string> = {
   report_maintenance: 'maintenance',
 };
 
-function executeTool(name: string, input: Record<string, unknown>, mock: boolean): string {
+function executeTool(name: string, input: Record<string, unknown>, groupId: number): string {
   try {
     switch (name) {
       case 'get_property_by_group': {
@@ -146,47 +148,36 @@ function executeTool(name: string, input: Record<string, unknown>, mock: boolean
         return JSON.stringify(result ?? { error: 'No property found for this group' });
       }
       case 'identify_user': {
-        const result = identifyUser(input.telegram_id as number, input.property_id as string);
+        const result = identifyUser(input.telegram_id as number, (input.group_id as number) ?? groupId);
         return JSON.stringify(result);
       }
       case 'get_booking': {
-        const result = getBooking(input.property_id as string, input.booking_id as string | undefined);
+        const result = getBooking((input.group_id as number) ?? groupId, input.booking_id as string | undefined);
         return JSON.stringify(result ?? { error: 'No active booking found' });
       }
       case 'get_property_info': {
-        const result = getPropertyInfo(input.property_id as string);
+        const result = getPropertyInfo((input.group_id as number) ?? groupId);
         return JSON.stringify(result ?? { error: 'Property not found' });
-      }
-      case 'check_budget': {
-        const result = checkBudget(input.property_id as string, input.amount as number);
-        return JSON.stringify(result);
-      }
-      case 'get_transaction_history': {
-        const result = getTransactionHistory(input.property_id as string, input.booking_id as string | undefined);
-        return JSON.stringify(result);
       }
       case 'link_guest': {
         const result = linkGuest(
           input.telegram_id as number,
-          input.property_id as string,
+          (input.group_id as number) ?? groupId,
           input.booking_ref as string | undefined,
         );
         return JSON.stringify(result);
       }
       case 'escalate_to_host': {
         const result = escalateToHost(
-          input.property_id as string,
+          (input.group_id as number) ?? groupId,
           input.reason as string,
           input.urgency as 'low' | 'medium' | 'high',
         );
         return JSON.stringify(result);
       }
       default: {
-        // Check if it's a plugin tool
         if (PLUGIN_TOOL_NAMES.has(name)) {
           const pluginName = PLUGIN_NAME_MAP[name];
-          // Plugin execution is async but we need sync for tool dispatch
-          // Return a placeholder — actual execution happens in executePluginTool
           return JSON.stringify({ pending_plugin: pluginName, input });
         }
         return JSON.stringify({ error: `Unknown tool: ${name}` });
@@ -200,27 +191,23 @@ function executeTool(name: string, input: Record<string, unknown>, mock: boolean
 async function executePluginTool(
   name: string,
   input: Record<string, unknown>,
-  mock: boolean,
-  propertyId?: string,
   guestInfo?: { name: string; telegramId: number; preferences?: string },
+  groupId?: number,
 ): Promise<string> {
   const pluginName = PLUGIN_NAME_MAP[name];
   if (!pluginName) return JSON.stringify({ error: `Unknown plugin tool: ${name}` });
 
-  const { getProperty } = await import('./store/properties.js');
-  const property = propertyId ? getProperty(propertyId) : undefined;
+  const { getPropertyByGroupId } = await import('./store/properties.js');
+  const property = groupId ? getPropertyByGroupId(groupId) : undefined;
 
   if (!property) {
     return JSON.stringify({ error: 'Property context not available for plugin execution' });
   }
 
-  const wallet = createWalletService(mock);
   const result = await executePlugin(pluginName, {
     guest: guestInfo ?? { name: 'Guest', telegramId: 0 },
     property,
     request: JSON.stringify(input),
-    wallet,
-    mock,
   });
 
   return JSON.stringify(result);
@@ -258,28 +245,41 @@ export async function processMessage(
     history = history.slice(-40);
   }
 
+  // Resolve wallet address for system prompt and payment checks
+  const stewardWallet = await getStewardWallet();
+  const systemPrompt = buildSystemPrompt(stewardWallet);
+
   // Track context discovered during tool calls
-  let discoveredPropertyId: string | undefined;
   let discoveredGuest: { name: string; telegramId: number; preferences?: string } | undefined;
 
   // Tool use loop
   let depth = 0;
   while (depth < MAX_TOOL_DEPTH) {
-    const response = await callMinimax(history, TOOL_DEFINITIONS, SYSTEM_PROMPT);
+    let response;
+    try {
+      response = await callMinimax(history, TOOL_DEFINITIONS, systemPrompt);
+    } catch (err) {
+      const msg = (err as Error).message;
+      // Stale tool_use ID in history — reset and retry with just the latest message
+      if (msg.includes('tool_result') || msg.includes('tool id') || msg.includes('2013')) {
+        console.warn('[agent] Stale history detected, resetting conversation');
+        history = [history[history.length - 1]];
+        conversationHistory.set(groupId, history);
+        response = await callMinimax(history, TOOL_DEFINITIONS, systemPrompt);
+      } else {
+        throw err;
+      }
+    }
 
     // Check for tool use
     const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use') as Extract<ContentBlock, { type: 'tool_use' }>[];
 
     if (toolUseBlocks.length === 0 || response.stop_reason === 'end_turn') {
-      // No tool calls — extract text response
       const textBlock = response.content.find((b) => b.type === 'text') as Extract<ContentBlock, { type: 'text' }> | undefined;
       const text = textBlock?.text ?? '';
 
-      // Save assistant response to history
       history.push({ role: 'assistant', content: response.content });
       conversationHistory.set(groupId, history);
-
-      // Persist to disk
       persistHistory(groupId, history);
 
       return text;
@@ -293,18 +293,37 @@ export async function processMessage(
       let result: string;
 
       if (PLUGIN_TOOL_NAMES.has(toolUse.name)) {
-        // Plugin tools need async execution with property/guest context
-        result = await executePluginTool(toolUse.name, toolInput, mock, discoveredPropertyId, discoveredGuest);
-      } else {
-        result = executeTool(toolUse.name, toolInput, mock);
-
-        // Capture context from tool results for plugin calls
-        if (toolUse.name === 'get_property_by_group') {
+        result = await executePluginTool(toolUse.name, toolInput, discoveredGuest, groupId);
+      } else if (toolUse.name === 'check_payment') {
+        const expectedAmount = toolInput.expected_amount as number;
+        if (mock) {
+          result = JSON.stringify({
+            received: true,
+            amount: expectedAmount,
+            wallet: stewardWallet,
+            message: `Payment of $${expectedAmount} USDC confirmed (mock mode)`,
+          });
+        } else {
           try {
-            const parsed = JSON.parse(result);
-            if (parsed.id) discoveredPropertyId = parsed.id;
-          } catch { /* ignore */ }
+            const { getUSDCBalance } = await import('./wallet.js');
+            const balance = await getUSDCBalance(stewardWallet);
+            result = JSON.stringify({
+              received: balance >= expectedAmount,
+              balance,
+              expected: expectedAmount,
+              wallet: stewardWallet,
+              message: balance >= expectedAmount
+                ? `Payment confirmed! Balance: $${balance} USDC`
+                : `Waiting for payment. Current balance: $${balance} USDC, need $${expectedAmount} USDC`,
+            });
+          } catch (err) {
+            result = JSON.stringify({ received: false, error: (err as Error).message });
+          }
         }
+      } else {
+        result = executeTool(toolUse.name, toolInput, groupId);
+
+        // Capture guest context from identify_user
         if (toolUse.name === 'identify_user') {
           try {
             const parsed = JSON.parse(result);
@@ -328,7 +347,6 @@ export async function processMessage(
     depth++;
   }
 
-  // If we hit max depth, return what we have
   conversationHistory.set(groupId, history);
   persistHistory(groupId, history);
   return 'I ran into a complex situation. Let me get the host to help.';
@@ -343,8 +361,7 @@ function persistHistory(groupId: number, history: AnthropicMessage[]): void {
 
   // Generate snapshot every 20 messages
   if (history.length > 0 && history.length % 20 === 0) {
-    const totalSpent = getTotalSpend(booking.id);
-    const snapshot = generateSnapshot(booking, history, totalSpent);
+    const snapshot = generateSnapshot(booking, history);
     saveSnapshot(booking, snapshot);
   }
 }

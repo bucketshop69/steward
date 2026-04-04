@@ -1,22 +1,23 @@
-import { getPropertyByGroupId as storeGetPropertyByGroup, getProperty } from '../store/properties.js';
-import { getActiveBooking as storeGetActiveBooking, getBooking as storeGetBooking, getBookingByGroupId, listBookings } from '../store/bookings.js';
-import { getTodaySpend } from '../store/transactions.js';
+import { getPropertyByGroupId, getHostTelegramId } from '../store/properties.js';
+import { getActiveBooking, getBooking as storeGetBooking, listBookings } from '../store/bookings.js';
 import type { Property, Booking, UserIdentity } from '../types.js';
 
-export function getPropertyByGroup(groupId: number): Property | undefined {
-  return storeGetPropertyByGroup(groupId);
+export function getPropertyByGroup(groupId: number): (Property & { groupId: number }) | undefined {
+  const property = getPropertyByGroupId(groupId);
+  if (!property) return undefined;
+  return { ...property, groupId };
 }
 
-export function identifyUser(telegramId: number, propertyId: string): UserIdentity {
-  const property = getProperty(propertyId);
-
+export function identifyUser(telegramId: number, groupId: number): UserIdentity {
+  const property = getPropertyByGroupId(groupId);
   if (!property) return { role: 'unknown' };
 
-  if (telegramId === property.hostTelegramId) {
+  const hostId = getHostTelegramId();
+  if (telegramId === hostId) {
     return { role: 'host' };
   }
 
-  const bookings = listBookings(propertyId);
+  const bookings = listBookings(groupId);
   const guestBooking = bookings.find((b) => b.guestTelegramId === telegramId);
 
   if (guestBooking) {
@@ -26,18 +27,7 @@ export function identifyUser(telegramId: number, propertyId: string): UserIdenti
   return { role: 'unknown' };
 }
 
-export function getBooking(propertyId: string, bookingId?: string): (Booking & { budgetRemaining: number }) | undefined {
-  const property = getProperty(propertyId);
-  if (!property) return undefined;
-
-  const booking = bookingId
-    ? storeGetBooking(bookingId)
-    : storeGetActiveBooking(propertyId);
-
-  if (!booking) return undefined;
-
-  const todaySpend = getTodaySpend(propertyId);
-  const budgetRemaining = property.dailyBudget - todaySpend;
-
-  return { ...booking, budgetRemaining };
+export function getBooking(groupId: number, bookingId?: string): Booking | undefined {
+  if (bookingId) return storeGetBooking(bookingId);
+  return getActiveBooking(groupId);
 }

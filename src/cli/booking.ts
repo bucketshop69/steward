@@ -1,6 +1,6 @@
 import readline from 'node:readline';
 import { addBooking, listBookings } from '../store/bookings.js';
-import { getProperty, listProperties } from '../store/properties.js';
+import { readConfig } from '../store/steward.js';
 import type { Booking } from '../types.js';
 
 function createPrompt(): readline.Interface {
@@ -38,37 +38,38 @@ function formatDate(dateStr: string): string {
 }
 
 async function addBookingFlow(args: string[]): Promise<void> {
-  // Parse --property flag
-  const propIdx = args.indexOf('--property');
-  let propertyId = propIdx !== -1 ? args[propIdx + 1] : undefined;
+  const config = readConfig();
 
-  if (!propertyId) {
-    const properties = listProperties();
-    if (properties.length === 0) {
+  // Parse --group flag
+  const groupIdx = args.indexOf('--group');
+  let groupId: number | undefined = groupIdx !== -1 ? Number(args[groupIdx + 1]) : undefined;
+
+  if (!groupId) {
+    if (config.groups.length === 0) {
       console.log('\nNo properties configured. Run: steward property add\n');
       return;
     }
-    if (properties.length === 1) {
-      propertyId = properties[0].id;
-      console.log(`\nUsing property: ${properties[0].name} (${propertyId})`);
+    if (config.groups.length === 1) {
+      groupId = config.groups[0].telegramGroupId;
+      console.log(`\nUsing group: ${groupId} (${config.groups[0].property.name})`);
     } else {
-      console.log('\nAvailable properties:');
-      for (const p of properties) {
-        console.log(`  ${p.id} — ${p.name}`);
+      console.log('\nAvailable groups:');
+      for (const g of config.groups) {
+        console.log(`  ${g.telegramGroupId} — ${g.property.name}`);
       }
       const rl = createPrompt();
-      propertyId = await ask(rl, '\nProperty ID');
+      groupId = Number(await ask(rl, '\nGroup ID'));
       rl.close();
     }
   }
 
-  const property = getProperty(propertyId!);
-  if (!property) {
-    console.log(`\nProperty "${propertyId}" not found. Run: steward property list\n`);
+  const group = config.groups.find((g) => g.telegramGroupId === groupId);
+  if (!group) {
+    console.log(`\nNo property for group ${groupId}. Run: steward property list\n`);
     return;
   }
 
-  console.log(`\n📋 Add a Booking for ${property.name}\n`);
+  console.log(`\n📋 Add a Booking for ${group.property.name}\n`);
   const rl = createPrompt();
 
   const guestName = await ask(rl, 'Guest name');
@@ -104,41 +105,38 @@ async function addBookingFlow(args: string[]): Promise<void> {
 
   const booking: Booking = {
     id,
-    propertyId: property.id,
     guestName,
     checkIn,
     checkOut,
     preferences: preferences || undefined,
     guestTelegramUsername: guestTelegramUsername || undefined,
     status: 'pending',
-    totalSpent: 0,
   };
 
-  addBooking(booking);
+  addBooking(groupId!, booking);
 
   console.log(`\n✅ Booking created: ${id}`);
   console.log(`  Guest: ${guestName}`);
   console.log(`  Dates: ${formatDate(checkIn)} - ${formatDate(checkOut)}`);
-  console.log(`  Property: ${property.name}`);
-  console.log(`\nNext: Start the bot with \`steward start\` to create the Telegram group.\n`);
+  console.log(`  Property: ${group.property.name}`);
+  console.log(`\nNext: Start the bot with \`steward start\`\n`);
 }
 
 function listBookingsFlow(): void {
   const bookings = listBookings();
 
   if (bookings.length === 0) {
-    console.log('\nNo bookings. Run: steward booking add --property <id>\n');
+    console.log('\nNo bookings. Run: steward booking add\n');
     return;
   }
 
   console.log('\nBookings:\n');
   const idWidth = Math.max(4, ...bookings.map((b) => b.id.length)) + 2;
-  const propWidth = Math.max(8, ...bookings.map((b) => b.propertyId.length)) + 2;
   const nameWidth = Math.max(5, ...bookings.map((b) => b.guestName.length)) + 2;
 
   for (const b of bookings) {
     const dates = `${formatDate(b.checkIn)} - ${formatDate(b.checkOut)}`;
-    console.log(`  ${b.id.padEnd(idWidth)}${b.propertyId.padEnd(propWidth)}${b.guestName.padEnd(nameWidth)}${dates.padEnd(22)}${b.status}`);
+    console.log(`  ${b.id.padEnd(idWidth)}${b.guestName.padEnd(nameWidth)}${dates.padEnd(22)}${b.status}`);
   }
   console.log('');
 }
@@ -154,8 +152,8 @@ export async function runBooking(subcommand: string, args: string[]): Promise<vo
     default:
       console.log(`
 Usage:
-  steward booking add --property <id>   Add a new booking
-  steward booking list                  List all bookings
+  steward booking add --group <group-id>   Add a new booking
+  steward booking list                     List all bookings
       `);
   }
 }

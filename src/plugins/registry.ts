@@ -1,6 +1,5 @@
 import type { Plugin, PluginParams, PluginResult } from '../types.js';
 import type { AnthropicToolDefinition } from '../minimax.js';
-import { addTransaction } from '../store/transactions.js';
 import { foodPlugin } from './food.js';
 import { cleaningPlugin } from './cleaning.js';
 import { taxiPlugin } from './taxi.js';
@@ -29,23 +28,7 @@ export async function executePlugin(name: string, params: PluginParams): Promise
     return { message: `Unknown service: ${name}` };
   }
 
-  const result = await plugin.handle(params);
-
-  // Auto-log transaction if plugin returned one
-  if (result.transaction && result.transaction.tx) {
-    addTransaction({
-      id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      propertyId: params.property.id,
-      bookingId: params.guest.telegramId.toString(),
-      plugin: plugin.name,
-      amount: result.transaction.amount,
-      description: result.transaction.description,
-      tx: result.transaction.tx,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  return result;
+  return plugin.handle(params);
 }
 
 export function getPluginToolSchemas(): AnthropicToolDefinition[] {
@@ -59,7 +42,6 @@ export function getPluginToolSchemas(): AnthropicToolDefinition[] {
           cuisine: { type: 'string', description: 'Type of food (e.g., Thai, Pizza, Sushi)' },
           people: { type: 'number', description: 'Number of people to feed' },
           dietary: { type: 'string', description: 'Dietary restrictions (e.g., vegetarian, no nuts)' },
-          budget: { type: 'number', description: 'Max budget in USDC' },
           special_requests: { type: 'string', description: 'Any special requests' },
         },
         required: ['cuisine', 'people'],
@@ -71,12 +53,11 @@ export function getPluginToolSchemas(): AnthropicToolDefinition[] {
       input_schema: {
         type: 'object',
         properties: {
-          property_id: { type: 'string', description: 'Property ID' },
           date: { type: 'string', description: 'When to clean (ISO date or today/tomorrow)' },
           type: { type: 'string', enum: ['standard', 'deep'], description: 'Cleaning type' },
           notes: { type: 'string', description: 'Special instructions' },
         },
-        required: ['property_id', 'date', 'type'],
+        required: ['date', 'type'],
       },
     },
     {

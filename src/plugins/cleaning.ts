@@ -1,47 +1,63 @@
 import type { Plugin } from '../types.js';
 
-const CLEANING_COSTS: Record<string, number> = {
-  standard: 50,
-  deep: 120,
-};
+interface CleaningPackage {
+  type: string;
+  description: string;
+  duration: string;
+  price: number;
+  includes: string[];
+}
+
+const PACKAGES: CleaningPackage[] = [
+  {
+    type: 'Quick Tidy',
+    description: 'Light cleanup between days',
+    duration: '~1 hour',
+    price: 25,
+    includes: ['Bed making', 'Bathroom wipe-down', 'Trash removal', 'Floor sweep'],
+  },
+  {
+    type: 'Standard Clean',
+    description: 'Full regular cleaning',
+    duration: '~2 hours',
+    price: 50,
+    includes: ['All rooms vacuumed & mopped', 'Bathroom deep clean', 'Kitchen clean', 'Fresh linens', 'Trash & recycling'],
+  },
+  {
+    type: 'Deep Clean',
+    description: 'Thorough top-to-bottom cleaning',
+    duration: '~3-4 hours',
+    price: 120,
+    includes: ['Everything in Standard', 'Appliance cleaning', 'Window cleaning', 'Upholstery refresh', 'Grout & tile scrub'],
+  },
+];
 
 export const cleaningPlugin: Plugin = {
   name: 'cleaning',
-  description: 'Schedule cleaning services for the property',
+  description: 'Get cleaning service quotes',
   triggers: ['clean', 'cleaning', 'housekeeping', 'tidy', 'maid'],
 
   async handle(params) {
     const input = params.request ? JSON.parse(params.request) : {};
-    const type = input.type ?? 'standard';
     const date = input.date ?? 'today';
     const notes = input.notes ?? '';
 
-    const cost = CLEANING_COSTS[type] ?? CLEANING_COSTS['standard'];
-
-    let tx: string;
-    if (params.mock) {
-      tx = `mock_clean_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    } else {
-      const payResult = await params.wallet.payX402({
-        amount: cost,
-        currency: 'USDC',
-        recipient: 'CleaningServiceWallet',
-        description: `${type} cleaning on ${date}`,
-      });
-      tx = payResult.tx;
-    }
-
-    let message = `${type.charAt(0).toUpperCase() + type.slice(1)} cleaning scheduled for ${date}. Cost: $${cost} USDC.`;
-    if (notes) message += ` Notes: ${notes}`;
+    const options = PACKAGES.map((p) => ({
+      type: p.type,
+      description: p.description,
+      duration: p.duration,
+      price: p.price,
+      includes: p.includes,
+    }));
 
     return {
-      message,
-      transaction: {
-        amount: cost,
-        recipient: 'CleaningService',
-        description: `${type} cleaning on ${date}`,
-        tx,
-      },
+      message: JSON.stringify({
+        type: 'quote',
+        date,
+        options,
+        notes: notes || undefined,
+        note: 'Show these cleaning packages to the guest. Prices are in USDC. Guest must pay before service is scheduled.',
+      }),
     };
   },
 };

@@ -1,24 +1,43 @@
 import type { Plugin } from '../types.js';
 
-const DESTINATION_COSTS: Record<string, number> = {
-  airport: 50,
-  downtown: 25,
-  beach: 15,
-  restaurant: 10,
-};
-const DEFAULT_COST = 25;
+interface RideOption {
+  type: string;
+  description: string;
+  capacity: number;
+  baseCost: number;
+  perKm: number;
+  eta: string;
+}
 
-function estimateCost(destination: string): number {
+const RIDE_OPTIONS: RideOption[] = [
+  { type: 'Economy', description: 'Standard sedan, A/C', capacity: 4, baseCost: 5, perKm: 1.5, eta: '5-10 min' },
+  { type: 'Comfort', description: 'Premium sedan, leather seats', capacity: 4, baseCost: 8, perKm: 2.0, eta: '8-12 min' },
+  { type: 'XL', description: 'SUV or minivan, fits luggage', capacity: 6, baseCost: 10, perKm: 2.5, eta: '10-15 min' },
+];
+
+// Simulated distance estimates
+const DESTINATION_DISTANCES: Record<string, number> = {
+  airport: 25,
+  downtown: 12,
+  beach: 5,
+  mall: 8,
+  restaurant: 4,
+  market: 6,
+  station: 15,
+  hospital: 10,
+};
+
+function estimateDistance(destination: string): number {
   const lower = destination.toLowerCase();
-  for (const [keyword, cost] of Object.entries(DESTINATION_COSTS)) {
-    if (lower.includes(keyword)) return cost;
+  for (const [keyword, km] of Object.entries(DESTINATION_DISTANCES)) {
+    if (lower.includes(keyword)) return km;
   }
-  return DEFAULT_COST;
+  return 10; // default ~10km
 }
 
 export const taxiPlugin: Plugin = {
   name: 'taxi',
-  description: 'Book taxi or transport services',
+  description: 'Get ride quotes and book transport',
   triggers: ['taxi', 'ride', 'uber', 'transport', 'car', 'pickup', 'airport', 'drive'],
 
   async handle(params) {
@@ -28,31 +47,28 @@ export const taxiPlugin: Plugin = {
     const time = input.time ?? 'now';
     const people = input.people ?? 1;
 
-    const cost = estimateCost(destination);
+    const distance = estimateDistance(destination);
 
-    let tx: string;
-    if (params.mock) {
-      tx = `mock_taxi_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    } else {
-      const payResult = await params.wallet.payX402({
-        amount: cost,
-        currency: 'USDC',
-        recipient: 'TaxiServiceWallet',
-        description: `Taxi: ${pickup} → ${destination}`,
-      });
-      tx = payResult.tx;
-    }
-
-    const eta = time === 'now' ? '~10 min' : `at ${time}`;
+    const options = RIDE_OPTIONS
+      .filter((r) => r.capacity >= people)
+      .map((r) => ({
+        type: r.type,
+        description: r.description,
+        capacity: r.capacity,
+        eta: time === 'now' ? r.eta : `Scheduled for ${time}`,
+        price: Math.round(r.baseCost + r.perKm * distance),
+        distance: `~${distance} km`,
+      }));
 
     return {
-      message: `Taxi booked! ${pickup} → ${destination} for ${people} passenger${people > 1 ? 's' : ''}. Cost: $${cost} USDC. Pickup ${eta}.`,
-      transaction: {
-        amount: cost,
-        recipient: 'TaxiService',
-        description: `Taxi: ${pickup} → ${destination}`,
-        tx,
-      },
+      message: JSON.stringify({
+        type: 'quote',
+        pickup,
+        destination,
+        options,
+        people,
+        note: 'Show these ride options to the guest. Prices are in USDC. Guest must pay before ride is confirmed.',
+      }),
     };
   },
 };
