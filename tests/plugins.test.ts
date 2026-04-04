@@ -2,18 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { PluginParams, Property } from '../src/types.js';
 
-const DATA_DIR = path.resolve('data');
-const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
 let passed = 0;
 let failed = 0;
 
 function assert(condition: boolean, name: string) {
   if (condition) { console.log(`  ✓ ${name}`); passed++; }
   else { console.log(`  ✗ ${name}`); failed++; }
-}
-
-function cleanup() {
-  if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
 }
 
 const testProperty: Property = {
@@ -158,8 +152,6 @@ const execResult = await executePlugin('food-delivery', makeParams({ cuisine: 'p
 const execQuote = JSON.parse(execResult.message);
 assert(execQuote.type === 'quote', 'execution returns quote');
 assert(execQuote.restaurants.length > 0, 'execution returns restaurants');
-
-cleanup();
 
 // ── Results ─────────────────────────────────────────
 

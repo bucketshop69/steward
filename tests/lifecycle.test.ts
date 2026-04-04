@@ -4,10 +4,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { writeConfig } from '../src/store/steward.js';
+import { writeConfig, setConfigFile, resetConfigFile } from '../src/store/steward.js';
 
 const DATA_DIR = path.resolve('data');
-const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
+const STEWARD_TEST_JSON = path.join(DATA_DIR, 'steward.test.json');
 let passed = 0;
 let failed = 0;
 
@@ -17,8 +17,11 @@ function assert(condition: boolean, name: string) {
 }
 
 function cleanup() {
-  if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
+  if (fs.existsSync(STEWARD_TEST_JSON)) fs.unlinkSync(STEWARD_TEST_JSON);
 }
+
+// Use test config file
+setConfigFile(STEWARD_TEST_JSON);
 
 const today = new Date().toISOString().slice(0, 10);
 const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
@@ -151,6 +154,7 @@ const futureMsgs = futureMessages.filter(m => m.text.includes('Charlie'));
 assert(futureMsgs.length === 0, 'no messages for future bookings');
 
 cleanup();
+resetConfigFile();
 
 // ── Results ─────────────────────────────────────────
 

@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { writeConfig } from '../src/store/steward.js';
+import { writeConfig, setConfigFile, resetConfigFile } from '../src/store/steward.js';
 
 const DATA_DIR = path.resolve('data');
-const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
+const STEWARD_TEST_JSON = path.join(DATA_DIR, 'steward.test.json');
 let passed = 0;
 let failed = 0;
 
@@ -13,8 +13,11 @@ function assert(condition: boolean, name: string) {
 }
 
 function cleanup() {
-  if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
+  if (fs.existsSync(STEWARD_TEST_JSON)) fs.unlinkSync(STEWARD_TEST_JSON);
 }
+
+// Use test config file
+setConfigFile(STEWARD_TEST_JSON);
 
 function seed() {
   writeConfig({
@@ -126,6 +129,7 @@ assert(lowEscalation.message.includes('ℹ️'), 'low urgency has info emoji');
 // ── Cleanup ─────────────────────────────────────────
 
 cleanup();
+resetConfigFile();
 
 console.log(`\n${'─'.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);

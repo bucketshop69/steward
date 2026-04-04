@@ -8,6 +8,7 @@ import type { Booking } from '../src/types.js';
 import type { AnthropicMessage } from '../src/minimax.js';
 
 const DATA_DIR = path.resolve('data');
+const TEST_MEMORY_DIR = path.join(DATA_DIR, 'test-memory');
 let passed = 0;
 let failed = 0;
 
@@ -17,7 +18,7 @@ function assert(condition: boolean, name: string) {
 }
 
 function cleanup() {
-  if (fs.existsSync(DATA_DIR)) fs.rmSync(DATA_DIR, { recursive: true });
+  if (fs.existsSync(TEST_MEMORY_DIR)) fs.rmSync(TEST_MEMORY_DIR, { recursive: true });
 }
 
 cleanup();
@@ -162,7 +163,8 @@ assert((withSnapshot[0].content as string).includes('ordered food'), 'summary in
 assert((withSnapshot[0].content as string).includes('Vegetarian'), 'summary includes key facts');
 assert((withSnapshot[0].content as string).includes('AC repair'), 'summary includes pending actions');
 
-cleanup();
+// Clean up only test booking dirs, not all of data/
+if (fs.existsSync(dirPath)) fs.rmSync(dirPath, { recursive: true });
 
 // ── Results ─────────────────────────────────────────
 

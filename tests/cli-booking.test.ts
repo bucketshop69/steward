@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 
 const DATA_DIR = path.resolve('data');
-const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
+const STEWARD_TEST_JSON = path.join(DATA_DIR, 'steward.test.json');
 let passed = 0;
 let failed = 0;
 
@@ -13,12 +13,12 @@ function assert(condition: boolean, name: string) {
 }
 
 function cleanup() {
-  if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
+  if (fs.existsSync(STEWARD_TEST_JSON)) fs.unlinkSync(STEWARD_TEST_JSON);
 }
 
 function seedConfig() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(STEWARD_JSON, JSON.stringify({
+  fs.writeFileSync(STEWARD_TEST_JSON, JSON.stringify({
     hostTelegramId: 12345,
     groups: [
       {
@@ -50,6 +50,7 @@ function runCommand(args: string[], inputs: string[] = []): Promise<{ stdout: st
     const child = spawn('npx', ['tsx', 'src/index.ts', ...args], {
       cwd: path.resolve('.'),
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, STEWARD_CONFIG: 'steward.test.json' },
     });
 
     let stdout = '';
@@ -91,7 +92,7 @@ async function main() {
   assert(result.stdout.includes('Beach House'), 'shows property name');
 
   // Verify stored data
-  const config = JSON.parse(fs.readFileSync(STEWARD_JSON, 'utf-8'));
+  const config = JSON.parse(fs.readFileSync(STEWARD_TEST_JSON, 'utf-8'));
   const bookings = config.groups[0].bookings;
   assert(bookings.length === 1, 'one booking stored');
   assert(bookings[0].guestName === 'John Smith', 'guest name stored');
@@ -107,7 +108,7 @@ async function main() {
   console.log('\nNo groups configured:');
   cleanup();
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(STEWARD_JSON, JSON.stringify({ hostTelegramId: 12345, groups: [] }, null, 2));
+  fs.writeFileSync(STEWARD_TEST_JSON, JSON.stringify({ hostTelegramId: 12345, groups: [] }, null, 2));
 
   const noProp = await runCommand(['booking', 'add'], []);
   assert(noProp.stdout.includes('No properties configured'), 'shows no properties message');
@@ -117,7 +118,7 @@ async function main() {
   console.log('\nAuto-select single group:');
   cleanup();
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(STEWARD_JSON, JSON.stringify({
+  fs.writeFileSync(STEWARD_TEST_JSON, JSON.stringify({
     hostTelegramId: 12345,
     groups: [{
       telegramGroupId: -100001,

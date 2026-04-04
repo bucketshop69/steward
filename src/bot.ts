@@ -2,6 +2,7 @@ import { Bot, Context, GrammyError, HttpError } from 'grammy';
 import { getPropertyByGroupId, getHostTelegramId } from './store/properties.js';
 import { getBookingByGroupId, getActiveBooking } from './store/bookings.js';
 import { processMessage } from './agent.js';
+import { processHostMessage } from './host-agent.js';
 import { checkLifecycleEvents } from './lifecycle.js';
 import { readConfig } from './store/steward.js';
 
@@ -99,14 +100,31 @@ export async function startBot(options: BotOptions): Promise<void> {
     }
   });
 
-  // Main message handler (text messages in groups)
+  // Main message handler (text messages)
   bot.on('message:text', async (ctx) => {
-    const groupId = ctx.chat.id;
+    const chatId = ctx.chat.id;
     const senderId = ctx.from.id;
     const text = ctx.message.text;
 
-    // Only handle group/supergroup messages
+    // Host DM mode — private messages from the host
+    if (ctx.chat.type === 'private' && isHostMessage(senderId)) {
+      console.log(`🏠 Host DM: "${text.slice(0, 80)}"`);
+      try {
+        const response = await processHostMessage(text);
+        if (response) {
+          await ctx.reply(response);
+        }
+      } catch (err) {
+        console.error('Host agent error:', err);
+        await ctx.reply('Sorry, I ran into an issue. Please try again.');
+      }
+      return;
+    }
+
+    // Only handle group/supergroup messages from here
     if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') return;
+
+    const groupId = chatId;
 
     // Look up property for this group
     const property = getPropertyByGroupId(groupId);
@@ -188,9 +206,24 @@ export async function startBot(options: BotOptions): Promise<void> {
     }
   }
 
+  // Lifecycle timer — check for check-in/check-out events every 15 minutes
+  const LIFECYCLE_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+  const lifecycleTimer = setInterval(async () => {
+    const msgs = checkLifecycleEvents();
+    for (const msg of msgs) {
+      try {
+        await bot.api.sendMessage(msg.groupId, msg.text);
+        console.log(`🔄 Lifecycle message sent to group ${msg.groupId}`);
+      } catch (err) {
+        console.error(`Failed to send lifecycle message to group ${msg.groupId}:`, (err as Error).message);
+      }
+    }
+  }, LIFECYCLE_INTERVAL_MS);
+
   // Graceful shutdown
   const shutdown = () => {
     console.log('\nShutting down Steward...');
+    clearInterval(lifecycleTimer);
     bot.stop();
     process.exit(0);
   };

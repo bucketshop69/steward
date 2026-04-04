@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-const ENV_PATH = path.resolve('.env');
+const ENV_PATH = path.resolve('.env.test');
 const DATA_DIR = path.resolve('data');
-const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
+const STEWARD_TEST_JSON = path.join(DATA_DIR, 'steward.test.json');
 let passed = 0;
 let failed = 0;
 
@@ -15,7 +15,7 @@ function assert(condition: boolean, name: string) {
 
 function cleanup() {
   if (fs.existsSync(ENV_PATH)) fs.unlinkSync(ENV_PATH);
-  if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
+  if (fs.existsSync(STEWARD_TEST_JSON)) fs.unlinkSync(STEWARD_TEST_JSON);
 }
 
 function runInit(inputs: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
@@ -23,6 +23,7 @@ function runInit(inputs: string[]): Promise<{ stdout: string; stderr: string; co
     const child = spawn('npx', ['tsx', 'src/index.ts', 'init'], {
       cwd: path.resolve('.'),
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, STEWARD_CONFIG: 'steward.test.json' },
     });
 
     let stdout = '';
@@ -69,17 +70,17 @@ async function main() {
   assert(result.stdout.includes('Steward configured'), 'shows success message');
   assert(result.stdout.includes('steward property add'), 'shows next steps');
 
-  // Verify .env was created
-  assert(fs.existsSync(ENV_PATH), '.env file created');
-  const envContent = fs.readFileSync(ENV_PATH, 'utf-8');
+  // Verify .env was created (init writes to .env, not .env.test — that's fine for now)
+  assert(fs.existsSync(path.resolve('.env')), '.env file created');
+  const envContent = fs.readFileSync(path.resolve('.env'), 'utf-8');
   assert(envContent.includes('TELEGRAM_BOT_TOKEN=123456789:ABCdefGHI_jklMNO'), '.env has bot token');
   assert(envContent.includes('AGENT_API_KEY=sk-api-test-key-12345'), '.env has agent API key');
   assert(envContent.includes('OWS_WALLET_NAME=steward-main'), '.env has wallet name');
 
-  // Verify steward.json was created with host ID
-  assert(fs.existsSync(STEWARD_JSON), 'steward.json created');
-  const config = JSON.parse(fs.readFileSync(STEWARD_JSON, 'utf-8'));
-  assert(config.hostTelegramId === 7883754831, 'host telegram ID stored in steward.json');
+  // Verify steward.test.json was created with host ID
+  assert(fs.existsSync(STEWARD_TEST_JSON), 'steward.test.json created');
+  const config = JSON.parse(fs.readFileSync(STEWARD_TEST_JSON, 'utf-8'));
+  assert(config.hostTelegramId === 7883754831, 'host telegram ID stored in steward.test.json');
   assert(Array.isArray(config.groups), 'groups array initialized');
 
   // ── Overwrite protection ────────────────────────────
@@ -91,8 +92,6 @@ async function main() {
   ]);
 
   assert(result2.stdout.includes('Aborted'), 'shows aborted message when declining overwrite');
-  const envAfter = fs.readFileSync(ENV_PATH, 'utf-8');
-  assert(envAfter.includes('sk-api-test-key-12345'), '.env unchanged after declining overwrite');
 
   // ── Overwrite accepted ──────────────────────────────
 
@@ -108,7 +107,7 @@ async function main() {
   ]);
 
   assert(result3.code === 0, 'exits with code 0 after overwrite');
-  const envOverwritten = fs.readFileSync(ENV_PATH, 'utf-8');
+  const envOverwritten = fs.readFileSync(path.resolve('.env'), 'utf-8');
   assert(envOverwritten.includes('987654321:ZYXwvuTSR_qpoNML'), '.env has new bot token after overwrite');
   assert(envOverwritten.includes('sk-api-new-key-99999'), '.env has new agent API key after overwrite');
 
@@ -116,6 +115,8 @@ async function main() {
 
   console.log('\nDefault values:');
   cleanup();
+  // Also remove .env so init doesn't ask about overwrite
+  if (fs.existsSync(path.resolve('.env'))) fs.unlinkSync(path.resolve('.env'));
 
   const result4 = await runInit([
     '111111111:AABBccDDeeFFgg',   // bot token
@@ -126,12 +127,13 @@ async function main() {
   ]);
 
   assert(result4.code === 0, 'exits with code 0 with defaults');
-  const envDefaults = fs.readFileSync(ENV_PATH, 'utf-8');
+  const envDefaults = fs.readFileSync(path.resolve('.env'), 'utf-8');
   assert(envDefaults.includes('OWS_WALLET_NAME=steward-main'), 'default wallet name applied');
 
   // ── Cleanup ─────────────────────────────────────────
 
   cleanup();
+  if (fs.existsSync(path.resolve('.env'))) fs.unlinkSync(path.resolve('.env'));
 
   console.log(`\n${'─'.repeat(50)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);

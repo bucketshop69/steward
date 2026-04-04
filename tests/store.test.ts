@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { readConfig, writeConfig } from '../src/store/steward.js';
+import { readConfig, writeConfig, setConfigFile, resetConfigFile } from '../src/store/steward.js';
 import { addProperty, listProperties, getPropertyByGroupId, updateProperty, getHostTelegramId } from '../src/store/properties.js';
 import { addBooking, listBookings, getBooking, getActiveBooking, updateBooking, getBookingByGroupId } from '../src/store/bookings.js';
 
 const DATA_DIR = path.resolve('data');
-const STEWARD_JSON = path.join(DATA_DIR, 'steward.json');
+const STEWARD_TEST_JSON = path.join(DATA_DIR, 'steward.test.json');
 let passed = 0;
 let failed = 0;
 
@@ -14,11 +14,12 @@ function assert(condition: boolean, name: string) {
   else { console.log(`  ✗ ${name}`); failed++; }
 }
 
-// Backup and cleanup
-const backup = fs.existsSync(STEWARD_JSON) ? fs.readFileSync(STEWARD_JSON) : null;
 function cleanup() {
-  if (fs.existsSync(STEWARD_JSON)) fs.unlinkSync(STEWARD_JSON);
+  if (fs.existsSync(STEWARD_TEST_JSON)) fs.unlinkSync(STEWARD_TEST_JSON);
 }
+
+// Use test config file
+setConfigFile(STEWARD_TEST_JSON);
 
 // ── Steward Config ─────────────────────────────────────
 
@@ -115,8 +116,8 @@ assert(getActiveBooking(-200)?.guestName === 'Bob', 'active booking in second gr
 
 console.log('\n💾 Persistence\n');
 
-assert(fs.existsSync(STEWARD_JSON), 'steward.json exists');
-const raw = JSON.parse(fs.readFileSync(STEWARD_JSON, 'utf-8'));
+assert(fs.existsSync(STEWARD_TEST_JSON), 'steward.test.json exists');
+const raw = JSON.parse(fs.readFileSync(STEWARD_TEST_JSON, 'utf-8'));
 assert(raw.hostTelegramId === 1111111111, 'host ID persisted');
 assert(raw.groups.length === 2, 'two groups persisted');
 assert(raw.groups[0].bookings.length === 1, 'bookings nested under group');
@@ -124,7 +125,7 @@ assert(raw.groups[0].bookings.length === 1, 'bookings nested under group');
 // ── Cleanup ────────────────────────────────────────────
 
 cleanup();
-if (backup) { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(STEWARD_JSON, backup); }
+resetConfigFile();
 
 console.log(`\n${'─'.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
